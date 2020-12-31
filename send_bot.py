@@ -2,18 +2,29 @@
 # -*- coding: utf-8 -*-
 
 import telebot
+from parse_token import parse_token
 
-TOKEN = '1415640092:AAGjpSpqw0wLFUiy-mw4Mi9IoPNelsxV8YQ'
-MY_ID = 1496518066
-GP_ID = -400364252
-tb = telebot.TeleBot(TOKEN)	#create a new Telegram Bot object
+def main():
+	
+	TOKEN = parse_token('bot_token')
 
-# sendMessage
-while True:
-	try:
-		msg = input("> ")
-		tb.send_message(GP_ID, msg)
+	if not TOKEN:
+		return
 
-	except KeyboardInterrupt:
-		print("end bot")
-		break
+	MY_ID = 1496518066
+	GP_ID = -400364252
+	tb = telebot.TeleBot(TOKEN)	#create a new Telegram Bot object
+
+	# sendMessage
+	while True:
+		try:
+			msg = input("> ")
+			tb.send_message(GP_ID, msg)
+
+		except KeyboardInterrupt:
+			print("\n[END]")
+			return
+
+
+if __name__ == '__main__':
+	main()

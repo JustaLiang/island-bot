@@ -20,7 +20,7 @@ import logging
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
-TOKEN = '1415640092:AAGjpSpqw0wLFUiy-mw4Mi9IoPNelsxV8YQ'
+from parse_token import parse_token
 
 # Enable logging
 logging.basicConfig(
@@ -31,26 +31,41 @@ logger = logging.getLogger(__name__)
 
 def random_choose(str_list):
     str_sum = [ sum([ord(char) for char in string]) for string in str_list ]
-    f_order = [ s%100 for s in str_sum ]
-    s_order = [ s%1000 for s in str_sum ]
+    str_mod = [ s%100 for s in str_sum ]
+    ttl_mod = sum(str_mod)%100
 
-    max_i = 0
-    for i in range(len(str_list)):
-        if (f_order[i] > f_order[max_i]) or (f_order[i] == f_order[max_i] and s_order[i] > s_order[max_i]):
-            max_v = f_order[i]
-            max_i = i
-    return str_list[max_i]
+    min_diff = 100
+    min_idx = 0
+    for i,mod in enumerate(str_mod):
+        diff = abs(mod - ttl_mod)
+        if diff < min_diff:
+            min_diff = diff
+            min_idx = i
+
+    return str_list[min_idx]
+
+
+def parse_name(name_json):
+    # {'id': 225404196, 'first_name': '音', 'is_bot': False, 'last_name': '抒情', 'username': 'Alyricing', 'language_code': 'zh-hans'}
+    ret_name = ''
+    if name_json['first_name']:
+        ret_name += name_json['first_name']
+    if name_json['last_name']:
+        if ret_name:
+            ret_name += ' '
+        ret_name += name_json['last_name']
+
+    if ret_name:
+        return ret_name
+    else:
+        return 'who the fuck'
+
 
 # Define a few command handlers. These usually take the two arguments update and
 # context. Error handlers also receive the raised TelegramError object in error.
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
     update.message.reply_text("嗨！")
-
-
-def help_command(update: Update, context: CallbackContext) -> None:
-    """Send a message when the command /help is issued."""
-    update.message.reply_text("7414")
 
 
 def echo(update: Update, context: CallbackContext) -> None:
@@ -74,7 +89,7 @@ def choose(update: Update, context: CallbackContext) -> None:
 def show(update: Update, context: CallbackContext) -> None:
     """Echo the user message."""
     try:
-        print(update.message.text)
+        print(parse_name(update.message.from_user), ':', update.message.text)
     except:
         return
 
@@ -84,14 +99,17 @@ def main():
     # Create the Updater and pass it your bot's token.
     # Make sure to set use_context=True to use the new context based callbacks
     # Post version 12 this will no longer be necessary
-    updater = Updater(TOKEN, use_context=True)
+    TOKEN = parse_token('bot_token')
+    if TOKEN:
+        updater = Updater(TOKEN, use_context=True)
+    else:
+        print("token file not")
 
     # Get the dispatcher to register handlers
     dispatcher = updater.dispatcher
 
     # on different commands - answer in Telegram
     dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("help", help_command))
     dispatcher.add_handler(CommandHandler("choose", choose))
 
     # on noncommand i.e message - echo the message on Telegram
