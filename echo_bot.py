@@ -16,7 +16,6 @@ bot.
 """
 
 import logging
-import random
 
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
@@ -30,17 +29,28 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+def random_choose(str_list):
+    str_sum = [ sum([ord(char) for char in string]) for string in str_list ]
+    f_order = [ s%100 for s in str_sum ]
+    s_order = [ s%1000 for s in str_sum ]
+
+    max_i = 0
+    for i in range(len(str_list)):
+        if (f_order[i] > f_order[max_i]) or (f_order[i] == f_order[max_i] and s_order[i] > s_order[max_i]):
+            max_v = f_order[i]
+            max_i = i
+    return str_list[max_i]
 
 # Define a few command handlers. These usually take the two arguments update and
 # context. Error handlers also receive the raised TelegramError object in error.
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
-    update.message.reply_text('Hi!')
+    update.message.reply_text("嗨！")
 
 
 def help_command(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /help is issued."""
-    update.message.reply_text('Help!')
+    update.message.reply_text("7414")
 
 
 def echo(update: Update, context: CallbackContext) -> None:
@@ -50,18 +60,23 @@ def echo(update: Update, context: CallbackContext) -> None:
 
 def choose(update: Update, context: CallbackContext) -> None:
     """choose what to eat."""
-    options = str(update.message.text).split()
-    if len(options) < 2:
-        update.message.reply_text("choose what?")
-    options = options[1:]
-    random.seed(len(update.message.text))
-    which = random.randint(0, len(options)-1)
-    update.message.reply_text(options[which])
+    options = update.message.text.split()
+    if len(options) <= 1:
+        update.message.reply_text("要選什麼？來亂的逆？")
+    elif len(options) == 2:
+        update.message.reply_text("幹，只有一個要選三小？")
+    else:
+        options = options[1:]
+        # which = len(update.message.text)%len(options)
+        update.message.reply_text(random_choose(options))
 
 
 def show(update: Update, context: CallbackContext) -> None:
     """Echo the user message."""
-    print(update.message.text)
+    try:
+        print(update.message.text)
+    except:
+        return
 
 
 def main():
