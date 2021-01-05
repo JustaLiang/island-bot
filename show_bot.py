@@ -27,7 +27,7 @@ def main():
     # Create the Updater and pass it your bot's token.
     # Make sure to set use_context=True to use the new context based callbacks
     # Post version 12 this will no longer be necessary
-    TOKEN = parse_token('bot_token')
+    TOKEN = parse_token('token_CD_info_bot')
     if TOKEN:
         updater = Updater(TOKEN, use_context=True)
     else:

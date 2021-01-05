@@ -6,13 +6,13 @@ from parse_token import parse_token
 
 def main():
 	
-	TOKEN = parse_token('bot_token')
+	TOKEN = parse_token('token_CD_parse_bot')
 
 	if not TOKEN:
 		return
 
 	MY_ID = 1496518066
-	GP_ID = -400364252
+	GP_ID = -1001182325701
 	tb = telebot.TeleBot(TOKEN)	#create a new Telegram Bot object
 
 	# sendMessage
