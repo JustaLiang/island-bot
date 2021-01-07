@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import telebot
-from parse_token import parse_token
+from misc import parse_token, parse_id
 
 def main():
 	
@@ -11,8 +11,10 @@ def main():
 	if not TOKEN:
 		return
 
-	MY_ID = 1496518066
-	GP_ID = -1001182325701
+	GP_ID = parse_id("id_melon_group")
+	if GP_ID == 0:
+		print("id file not found")
+		return
 	tb = telebot.TeleBot(TOKEN)	#create a new Telegram Bot object
 
 	# sendMessage

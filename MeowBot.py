@@ -23,7 +23,7 @@ import copy
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
-from parse_token import parse_token
+from misc import parse_token, parse_name
 
 # Enable logging
 logging.basicConfig(
@@ -32,20 +32,6 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-def parse_name(name_json):
-    # {'id': 225404196, 'first_name': '音', 'is_bot': False, 'last_name': '抒情', 'username': 'Alyricing', 'language_code': 'zh-hans'}
-    ret_name = ''
-    if name_json['first_name']:
-        ret_name += name_json['first_name']
-    if name_json['last_name']:
-        if ret_name:
-            ret_name += ' '
-        ret_name += name_json['last_name']
-
-    if ret_name:
-        return ret_name
-    else:
-        return 'who the fuck'
 
 def random_choice(x, size=None, replace=True, p=None):
     if p is not None:
