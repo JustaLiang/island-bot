@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# pylint: disable=W0613, C0116
 
 import logging
 
@@ -9,6 +8,7 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 
 from misc import parse_token, parse_name
 import numpy as np
+import json
 
 # Enable logging
 logging.basicConfig(
@@ -21,82 +21,165 @@ logger = logging.getLogger(__name__)
 self_name = 'Island Bot'
 token_file = 'token_CD_info_bot'
 
-# Functions
-def string_ord(string):
-    return sum([ ord(char) for char in string ])
+# user_json = {}
 
-def determine(str_list):
-    str_sum = [ string_ord(string) for string in str_list ]
-    str_mod = [ s%100 for s in str_sum ]
-    ttl_mod = sum(str_mod)%100
+default_reply = "@@"
+
+n = 13
+m = 1999
+
+# Functions
+def mod_diff(mod1, mod2):
+    if mod1 >= mod2:
+        return min(mod1-mod2, mod2+m-mod1)
+    else:
+        return min(mod2-mod1, mod1+m-mod2)
+
+def refine_list(str_list):
+    return [ string for string in str_list if string ]
+
+def string_sum(string):
+    return sum([ ord(char) for char in string])
+
+def string_hash(target, base):
+    target_sum = string_sum(target)
+    base_sum = string_sum(base)
+    return ((target_sum-base_sum)%m)**n%m
+
+def determine(str_list, str_base, sort=False):
+    str_hashs = [ string_hash(string, str_base) for string in str_list ]
+
+    str_rank = sorted(dict(zip(str_list, str_hashs)).items(), key=lambda x:x[1])
+
+    if sort:
+        return ''.join(['\n%s (%.1f%%)'%(rank[0], 100-rank[1]/20) for rank in str_rank])
+    else:
+        return '%s (%.1f%%)'%(str_rank[0][0], 100-str_rank[0][1]/20)
+
+def old_determine(str_list):
+    str_mods = [ string_sum(string)%100 for string in str_list ]
+    ttl_mod = sum(str_mods)%100
 
     min_diff = 100
     min_idx = 0
-    for i,mod in enumerate(str_mod):
+    for i,mod in enumerate(str_mods):
         diff = abs(mod - ttl_mod)
         if diff < min_diff:
-            min_diff = diff
+            min_diff = diff 
             min_idx = i
 
-    return str_list[min_idx]
-
+    return str_list[min_idx]     
 
 # Define a few command handlers. These usually take the two arguments update and
 # context. Error handlers also receive the raised TelegramError object in error.
 def start(update: Update, context: CallbackContext) -> None:
-    """Send a message when the command /start is issued."""
-    update.message.reply_text("嗨？")
+    update.message.reply_text("Hi?")
 
 def echo(update: Update, context: CallbackContext) -> None:
-    """Echo the user message."""
     update.message.reply_text(update.message.text)
 
 def certain_choose(update: Update, context: CallbackContext) -> None:
+    if update.message is None:
+        return
 
-    print(parse_name(update.message.from_user), ':', update.message.text)
+    # print(parse_name(update.message.from_user), ':', update.message.text)
 
-    try:
-        options = update.message.text.split()
-    except:
-        print('[split error]')
-        pass
+    options = update.message.text.split()
+    refine_list(options)
 
-    if len(options) <= 2:
-        update.message.reply_text('？？？')
-        print(self_name, ': ？？？')
+    if len(options) < 3:
+        update.message.reply_text(default_reply)
+        print(self_name, ':', default_reply)
     else:
         options = options[1:]
-        result = determine(options)
+        result = old_determine(options)
         update.message.reply_text(result)
         print(self_name, ':', result)
 
+
 def random_choose(update: Update, context: CallbackContext) -> None:
+    if update.message is None:
+        return
 
-    print(parse_name(update.message.from_user), ':', update.message.text)
+    # print(parse_name(update.message.from_user), ':', update.message.text)
 
-    try:
-        options = update.message.text.split()
-    except:
-        print('[split error]')
-        pass
+    options = update.message.text.split()
+    refine_list(options)
 
-    if len(options) <= 2:
-        update.message.reply_text('？？？')
-        print(self_name, ': ？？？')
-
+    if len(options) < 3:
+        update.message.reply_text(default_reply)
+        print(self_name, ':', default_reply)
     else:
         options = options[1:]
         which = np.random.randint(len(options))
         update.message.reply_text(options[which])
         print(self_name, ':', options[which])
 
+
+def tell(update: Update, context: CallbackContext) -> None:
+    if update.message is None:
+        return
+
+    # print(parse_name(update.message.from_user), ':', update.message.text)
+
+    if '？' in update.message.text:
+        q_mark = '？'
+    elif '?' in update.message.text:
+        q_mark = '?'
+    else:
+        update.message.reply_text(default_reply)
+        print(self_name, ':', default_reply)
+        return
+
+    qsn_opt = update.message.text.split(q_mark)
+
+    qsn_str = qsn_opt[0].replace('/tell@CD_info_bot','').replace('/tell','').strip()
+    options = qsn_opt[1].split()
+    refine_list(options)
+
+    if len(options) < 1:
+        update.message.reply_text(default_reply)
+        print(self_name, ':', default_reply)
+    else:
+        result = determine(options, qsn_str)
+        update.message.reply_text(result)
+        print(self_name, ':', result)
+
+
+def tells(update: Update, context: CallbackContext) -> None:
+    if update.message is None:
+        return
+
+    # print(parse_name(update.message.from_user), ':', update.message.text)
+
+    if '？' in update.message.text:
+        q_mark = '？'
+    elif '?' in update.message.text:
+        q_mark = '?'
+    else:
+        update.message.reply_text(default_reply)
+        print(self_name, ':', default_reply)
+        return
+
+    qsn_opt = update.message.text.split(q_mark)
+
+    qsn_str = qsn_opt[0].replace('/tells@CD_info_bot','').replace('/tells','').strip()
+    options = qsn_opt[1].split()
+    refine_list(options)
+
+    if len(options) < 1:
+        update.message.reply_text(default_reply)
+        print(self_name, ':', default_reply)
+    else:
+        result = determine(options, qsn_str, sort=True)
+        update.message.reply_text(result)
+        print(self_name, ':', result)    
+
+
 def show(update: Update, context: CallbackContext) -> None:
-    """Echo the user message."""
-    try:
-        print(parse_name(update.message.from_user), ':', update.message.text)
-    except:
-        print("[display error]")
-        pass
+    if update.message is None:
+        return
+    print(parse_name(update.message.from_user), ':', update.message.text)
 
 #-------------------------------------------------------------------
 #   main
@@ -119,10 +202,12 @@ def main():
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CommandHandler("choose", certain_choose))
     dispatcher.add_handler(CommandHandler("random", random_choose))
+    dispatcher.add_handler(CommandHandler("tell", tell))
+    dispatcher.add_handler(CommandHandler("tells", tells))
 
     # on noncommand i.e message - echo the message on Telegram
     # dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, echo))
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, show))
+    dispatcher.add_handler(MessageHandler(Filters.all, show))
 
     # Start the Bot
     updater.start_polling()
@@ -131,7 +216,6 @@ def main():
     # SIGTERM or SIGABRT. This should be used most of the time, since
     # start_polling() is non-blocking and will stop the bot gracefully.
     updater.idle()
-
 
 if __name__ == '__main__':
     main()
