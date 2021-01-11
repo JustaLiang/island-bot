@@ -3,12 +3,13 @@
 
 import logging
 
-from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+import telegram
+from telegram import Update, constants
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
 
 from misc import parse_token, parse_name
 import numpy as np
-import json
+import json, time
 
 # Enable logging
 logging.basicConfig(
@@ -34,9 +35,6 @@ def mod_diff(mod1, mod2):
         return min(mod1-mod2, mod2+m-mod1)
     else:
         return min(mod2-mod1, mod1+m-mod2)
-
-def refine_list(str_list):
-    return [ string for string in str_list if string ]
 
 def string_sum(string):
     return sum([ ord(char) for char in string])
@@ -73,7 +71,7 @@ def old_determine(str_list):
 # Define a few command handlers. These usually take the two arguments update and
 # context. Error handlers also receive the raised TelegramError object in error.
 def start(update: Update, context: CallbackContext) -> None:
-    update.message.reply_text("Hi?")
+    update.message.reply_text("嗨？")
 
 def echo(update: Update, context: CallbackContext) -> None:
     update.message.reply_text(update.message.text)
@@ -81,11 +79,9 @@ def echo(update: Update, context: CallbackContext) -> None:
 def certain_choose(update: Update, context: CallbackContext) -> None:
     if update.message is None:
         return
-
-    # print(parse_name(update.message.from_user), ':', update.message.text)
+    print(parse_name(update.message.from_user), ':', update.message.text)
 
     options = update.message.text.split()
-    refine_list(options)
 
     if len(options) < 3:
         update.message.reply_text(default_reply)
@@ -100,11 +96,9 @@ def certain_choose(update: Update, context: CallbackContext) -> None:
 def random_choose(update: Update, context: CallbackContext) -> None:
     if update.message is None:
         return
-
-    # print(parse_name(update.message.from_user), ':', update.message.text)
+    print(parse_name(update.message.from_user), ':', update.message.text)
 
     options = update.message.text.split()
-    refine_list(options)
 
     if len(options) < 3:
         update.message.reply_text(default_reply)
@@ -119,8 +113,7 @@ def random_choose(update: Update, context: CallbackContext) -> None:
 def tell(update: Update, context: CallbackContext) -> None:
     if update.message is None:
         return
-
-    # print(parse_name(update.message.from_user), ':', update.message.text)
+    print(parse_name(update.message.from_user), ':', update.message.text)
 
     if '？' in update.message.text:
         q_mark = '？'
@@ -135,7 +128,6 @@ def tell(update: Update, context: CallbackContext) -> None:
 
     qsn_str = qsn_opt[0].replace('/tell@CD_info_bot','').replace('/tell','').strip()
     options = qsn_opt[1].split()
-    refine_list(options)
 
     if len(options) < 1:
         update.message.reply_text(default_reply)
@@ -149,8 +141,7 @@ def tell(update: Update, context: CallbackContext) -> None:
 def tells(update: Update, context: CallbackContext) -> None:
     if update.message is None:
         return
-
-    # print(parse_name(update.message.from_user), ':', update.message.text)
+    print(parse_name(update.message.from_user), ':', update.message.text)
 
     if '？' in update.message.text:
         q_mark = '？'
@@ -165,7 +156,6 @@ def tells(update: Update, context: CallbackContext) -> None:
 
     qsn_str = qsn_opt[0].replace('/tells@CD_info_bot','').replace('/tells','').strip()
     options = qsn_opt[1].split()
-    refine_list(options)
 
     if len(options) < 1:
         update.message.reply_text(default_reply)
@@ -180,6 +170,73 @@ def show(update: Update, context: CallbackContext) -> None:
     if update.message is None:
         return
     print(parse_name(update.message.from_user), ':', update.message.text)
+
+
+def shuffle(update: Update, context: CallbackContext) -> None:
+    if update.message is None:
+        return
+    print(parse_name(update.message.from_user), ':', update.message.text)
+
+    options = update.message.text.split()
+
+    if len(options) < 3:
+        update.message.reply_text(default_reply)
+        print(self_name, ':', default_reply)
+    else:
+        options = options[1:]
+        np.random.shuffle(options)
+        result = ' '.join(options)
+        update.message.reply_text(result)
+        print(self_name, ':', result)        
+
+
+def pair(update: Update, context: CallbackContext) -> None:
+    if update.message is None:
+        return
+    print(parse_name(update.message.from_user), ':', update.message.text)    
+
+    if '？' in update.message.text:
+        q_mark = '？'
+    elif '?' in update.message.text:
+        q_mark = '?'
+    else:
+        update.message.reply_text(default_reply)
+        print(self_name, ':', default_reply)
+        return
+
+    source_target = update.message.text.split(q_mark)
+    source = source_target[0].replace('/pair@CD_info_bot','').replace('/pair','').split()
+    target = source_target[1].split()
+
+    if len(source) <= len(target):
+        np.random.shuffle(target)
+    else:
+        target = target * (len(source)//len(target)+1)
+
+    result = ''.join([ '\n'+src+' - '+tar for src,tar in zip(source, target)])
+    update.message.reply_text(result)
+    print(self_name, ':', result)
+
+def dice(update: Update, context: CallbackContext) -> None:
+    update.message.reply_dice(emoji=constants.DICE_DICE)
+
+def slot(update: Update, context: CallbackContext) -> None:
+    update.message.reply_dice(emoji=constants.DICE_SLOT_MACHINE)
+
+def fruit(update: Update, context: CallbackContext) -> None:
+    keyboard = [[telegram.InlineKeyboardButton("蘋果", callback_data="蘋果"),
+                 telegram.InlineKeyboardButton("香蕉", callback_data="香蕉")],
+                [telegram.InlineKeyboardButton("橘子", callback_data="橘子"),
+                 telegram.InlineKeyboardButton("芭樂", callback_data="芭樂")]]
+
+    reply_markup = telegram.InlineKeyboardMarkup(keyboard)
+    update.message.reply_text('Please choose', reply_markup=reply_markup)
+
+def fruit_button(update: Update, context: CallbackContext) -> None:
+    query = update.callback_query
+    query.answer()
+    query.edit_message_text(text=f"你喜歡吃{query.data}")
+
 
 #-------------------------------------------------------------------
 #   main
@@ -204,6 +261,12 @@ def main():
     dispatcher.add_handler(CommandHandler("random", random_choose))
     dispatcher.add_handler(CommandHandler("tell", tell))
     dispatcher.add_handler(CommandHandler("tells", tells))
+    dispatcher.add_handler(CommandHandler("shuffle", shuffle))
+    dispatcher.add_handler(CommandHandler("pair", pair))
+    dispatcher.add_handler(CommandHandler("dice", dice))
+    dispatcher.add_handler(CommandHandler("slot", slot))
+    dispatcher.add_handler(CommandHandler("fruit", fruit))
+    dispatcher.add_handler(CallbackQueryHandler(fruit_button))
 
     # on noncommand i.e message - echo the message on Telegram
     # dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, echo))
