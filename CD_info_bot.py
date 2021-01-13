@@ -7,9 +7,9 @@ import telegram
 from telegram import Update, constants
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
 
-from misc import parse_token, parse_name
+from misc import parse_token, parse_name, parse_id
 import numpy as np
-import json, time
+import json, time, os, signal
 
 # Enable logging
 logging.basicConfig(
@@ -81,14 +81,11 @@ def certain_choose(update: Update, context: CallbackContext) -> None:
         return
     print(parse_name(update.message.from_user), ':', update.message.text)
 
-    options = update.message.text.split()
-
-    if len(options) < 3:
+    if len(context.args) < 2:
         update.message.reply_text(default_reply)
         print(self_name, ':', default_reply)
     else:
-        options = options[1:]
-        result = old_determine(options)
+        result = old_determine(context.args)
         update.message.reply_text(result)
         print(self_name, ':', result)
 
@@ -98,16 +95,13 @@ def random_choose(update: Update, context: CallbackContext) -> None:
         return
     print(parse_name(update.message.from_user), ':', update.message.text)
 
-    options = update.message.text.split()
-
-    if len(options) < 3:
+    if len(context.args) < 2:
         update.message.reply_text(default_reply)
         print(self_name, ':', default_reply)
     else:
-        options = options[1:]
-        which = np.random.randint(len(options))
-        update.message.reply_text(options[which])
-        print(self_name, ':', options[which])
+        result = np.random.choice(context.args)
+        update.message.reply_text(result)
+        print(self_name, ':', result)
 
 
 def tell(update: Update, context: CallbackContext) -> None:
@@ -171,23 +165,29 @@ def show(update: Update, context: CallbackContext) -> None:
         return
     print(parse_name(update.message.from_user), ':', update.message.text)
 
+    if np.random.randint(0,20) == 0:
+        keyboard = [[telegram.InlineKeyboardButton("領取", callback_data=np.random.randint(10,31))]]
+        reply_markup = telegram.InlineKeyboardMarkup(keyboard)
+        update.message.bot.send_message(chat_id=update.message.chat_id,
+                                        text="搶紅包囉！",
+                                        reply_markup=reply_markup)
+
 
 def shuffle(update: Update, context: CallbackContext) -> None:
     if update.message is None:
         return
     print(parse_name(update.message.from_user), ':', update.message.text)
 
-    options = update.message.text.split()
+    options = context.args
 
-    if len(options) < 3:
+    if len(options) < 2:
         update.message.reply_text(default_reply)
         print(self_name, ':', default_reply)
     else:
-        options = options[1:]
         np.random.shuffle(options)
         result = ' '.join(options)
         update.message.reply_text(result)
-        print(self_name, ':', result)        
+        print(self_name, ':', result)
 
 
 def pair(update: Update, context: CallbackContext) -> None:
@@ -217,26 +217,25 @@ def pair(update: Update, context: CallbackContext) -> None:
     update.message.reply_text(result)
     print(self_name, ':', result)
 
+
 def dice(update: Update, context: CallbackContext) -> None:
     update.message.reply_dice(emoji=constants.DICE_DICE)
 
-def slot(update: Update, context: CallbackContext) -> None:
-    update.message.reply_dice(emoji=constants.DICE_SLOT_MACHINE)
 
-def fruit(update: Update, context: CallbackContext) -> None:
-    keyboard = [[telegram.InlineKeyboardButton("蘋果", callback_data="蘋果"),
-                 telegram.InlineKeyboardButton("香蕉", callback_data="香蕉")],
-                [telegram.InlineKeyboardButton("橘子", callback_data="橘子"),
-                 telegram.InlineKeyboardButton("芭樂", callback_data="芭樂")]]
+def dice_value(update: Update, context: CallbackContext) -> None:
+    print(update.message.dice.value)
 
-    reply_markup = telegram.InlineKeyboardMarkup(keyboard)
-    update.message.reply_text('Please choose', reply_markup=reply_markup)
 
-def fruit_button(update: Update, context: CallbackContext) -> None:
+def envelope(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
-    query.edit_message_text(text=f"你喜歡吃{query.data}")
+    query.edit_message_text(f"{query.from_user.full_name} 收到{query.data}顆島幣")
 
+
+def terminate(update: Update, context: CallbackContext) -> None:
+    if update.message.from_user.id == parse_id('id_justa'):
+        update.message.reply_text("terminated")
+        os.kill(os.getpid(), signal.SIGINT)
 
 #-------------------------------------------------------------------
 #   main
@@ -264,13 +263,13 @@ def main():
     dispatcher.add_handler(CommandHandler("shuffle", shuffle))
     dispatcher.add_handler(CommandHandler("pair", pair))
     dispatcher.add_handler(CommandHandler("dice", dice))
-    dispatcher.add_handler(CommandHandler("slot", slot))
-    dispatcher.add_handler(CommandHandler("fruit", fruit))
-    dispatcher.add_handler(CallbackQueryHandler(fruit_button))
+    dispatcher.add_handler(CallbackQueryHandler(envelope))
+    dispatcher.add_handler(CommandHandler("terminate", terminate))
 
     # on noncommand i.e message - echo the message on Telegram
     # dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, echo))
-    dispatcher.add_handler(MessageHandler(Filters.all, show))
+    dispatcher.add_handler(MessageHandler(Filters.text, show))
+    dispatcher.add_handler(MessageHandler(Filters.dice, dice_value))
 
     # Start the Bot
     updater.start_polling()
