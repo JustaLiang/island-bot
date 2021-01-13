@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 self_name = 'Island Bot'
 token_file = 'token_CD_info_bot'
 
+envelope_state = False
+
 # user_json = {}
 
 default_reply = "@@"
@@ -165,7 +167,8 @@ def show(update: Update, context: CallbackContext) -> None:
         return
     print(parse_name(update.message.from_user), ':', update.message.text)
 
-    if np.random.randint(0,20) == 0:
+    if np.random.randint(0,25) == 0:
+        envelope_state = True
         keyboard = [[telegram.InlineKeyboardButton("領取", callback_data=np.random.randint(10,31))]]
         reply_markup = telegram.InlineKeyboardMarkup(keyboard)
         update.message.bot.send_message(chat_id=update.message.chat_id,
@@ -229,8 +232,9 @@ def dice_value(update: Update, context: CallbackContext) -> None:
 def envelope(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
     query.answer()
-    query.edit_message_text(f"{query.from_user.full_name} 收到{query.data}顆島幣")
-
+    if envelope_state:
+        query.edit_message_text(f"{query.from_user.full_name} 收到{query.data}顆島幣")
+        envelope_state = False
 
 def terminate(update: Update, context: CallbackContext) -> None:
     if update.message.from_user.id == parse_id('id_justa'):
@@ -272,7 +276,7 @@ def main():
     dispatcher.add_handler(MessageHandler(Filters.dice, dice_value))
 
     # Start the Bot
-    updater.start_polling()
+    updater.start_polling(poll_interval=2, clean=True)
 
     # Run the bot until you press Ctrl-C or the process receives SIGINT,
     # SIGTERM or SIGABRT. This should be used most of the time, since
