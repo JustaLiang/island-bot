@@ -5,11 +5,9 @@ import telegram as tg
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
 
-from misc import parse_token, parse_name, parse_id
+from misc import parse_token, parse_id
 import numpy as np
 import json, os, signal
-
-ERR_REPLY = '請正確地使用指令喔^^'
 
 # Functions
 def string_sum(string):
@@ -62,7 +60,7 @@ class CDInfoBot:
         self.token = bot_token
         self.owner = bot_owner
         self.name = bot_name
-        self.err_reply = ERR_REPLY
+        self.err_reply = '🤯'
         self.envelope_state = False
 
         self.updater = Updater(self.token, use_context=True)
@@ -81,11 +79,9 @@ class CDInfoBot:
         print(f"[{self.name} ready]")
 
     def run(self):
-        self.updater.start_polling(poll_interval=2, clean=True)
+        self.updater.start_polling(poll_interval=1, clean=True)
         print(f"[{self.name} running]")
         self.updater.idle()
-        print(f"[{self.name} saving]")
-        self._save_user_info()
         print(f"[{self.name} terminated]")
 
     def _valid_update(self, update):
@@ -108,7 +104,7 @@ class CDInfoBot:
     def choose(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
-        if len(context.args) < 1:
+        if len(context.args) < 2:
             self._reply(update)
         else:
             result = old_determine(context.args)
@@ -117,7 +113,7 @@ class CDInfoBot:
     def random(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
-        if len(context.args) < 1:
+        if len(context.args) < 2:
             self._reply(update)
         else:
             result = np.random.choice(context.args)
@@ -154,7 +150,7 @@ class CDInfoBot:
     def shuffle(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
-        if len(context.args) < 1:
+        if len(context.args) < 2:
             self._reply(update)
         else:
             np.random.shuffle(context.args)
@@ -183,7 +179,7 @@ class CDInfoBot:
             return
         if np.random.randint(0,25) == 0 and not self.envelope_state:
             self.envelope_state = True
-            keyboard = [[tg.InlineKeyboardButton(callback_data=np.random.randint(10,31),text='領取')]]
+            keyboard = [[tg.InlineKeyboardButton(callback_data=round(np.random.normal(20,5)), text='領取')]]
             reply_markup = tg.InlineKeyboardMarkup(keyboard)
             update.message.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")
 
@@ -202,9 +198,7 @@ class CDInfoBot:
 
     def sleep(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
-            print(f"[{self.name} saving]")
             update.message.reply_text("zzz")
-            print(f"[{self.name} terminated]")
             os.kill(os.getpid(), signal.SIGINT)
 
 #-------------------------------------------------------------------
