@@ -7,11 +7,11 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 
 from misc import parse_token, parse_id
 import numpy as np
-import json, os, signal
+import json, os, signal, time
 
 # Functions
 def string_sum(string):
-    return sum([ ord(char) for char in string])
+    return sum([ord(char) for char in string])
 
 def string_hash(target, base):
     n = 13
@@ -54,14 +54,19 @@ def split_question(str_list):
 
     return qsn_opt[0], qsn_opt[1]
 
+
 # Bot class
 class CDInfoBot:
     def __init__(self, bot_token, bot_owner, bot_name):
         self.token = bot_token
         self.owner = bot_owner
         self.name = bot_name
-        self.err_reply = '🤯'
-        self.envelope_state = False
+        self.error_reply = ['🤯','😐']
+        self.sorry_reply = ['🍑','🍓','🍎','🍊','💣']
+        self.envelopes = []
+        self.p_possi = 25
+        self.p_mean = 4
+        self.p_std = 2
 
         self.updater = Updater(self.token, use_context=True)
         dpr = self.updater.dispatcher
@@ -72,8 +77,14 @@ class CDInfoBot:
         dpr.add_handler(CommandHandler("tells", self.tells))
         dpr.add_handler(CommandHandler("shuffle", self.shuffle))
         dpr.add_handler(CommandHandler("pair", self.pair))
-        dpr.add_handler(CommandHandler("dice", self.dice))
+        dpr.add_handler(CommandHandler("dice", self.dice, run_async=True))
+        dpr.add_handler(CommandHandler("count", self.count, run_async=True))
+        #--------------------------------------------------------
         dpr.add_handler(CommandHandler("sleep", self.sleep))
+        dpr.add_handler(CommandHandler("status", self.status))
+        dpr.add_handler(CommandHandler("clear", self.clear))
+        dpr.add_handler(CommandHandler("param", self.param))
+        #--------------------------------------------------------
         dpr.add_handler(MessageHandler(Filters.all, self.show))
         dpr.add_handler(CallbackQueryHandler(self.envelope))
         print(f"[{self.name} ready]")
@@ -91,78 +102,82 @@ class CDInfoBot:
             print(update.message.from_user.full_name, ':', update.message.text)
             return True
 
-    def _reply(self, update, content=None):
-        if content is None:
-            content = self.err_reply
+    def _reply(self, update, content):
         update.message.reply_text(content)
         print(self.name, ':', content)   
 
-    # Handlers
+# Command Handler: /start
     def start(self, update: Update, context: CallbackContext) -> None:
         update.message.reply_text("嗨？")
 
+# Command Handler: /choose
     def choose(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
         if len(context.args) < 2:
-            self._reply(update)
+            self._reply(update, self.error_reply[len(context.args)])
         else:
             result = old_determine(context.args)
             self._reply(update, result)
 
+# Command Handler: /random
     def random(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
         if len(context.args) < 2:
-            self._reply(update)
+            self._reply(update, self.error_reply[len(context.args)])
         else:
             result = np.random.choice(context.args)
             self._reply(update, result)
 
+# Command Handler: /tell
     def tell(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
         question, options = split_question(context.args)
         if question is None or options is None:
-            self._reply(update)
+            self._reply(update, self.error_reply[0])
             return
         options = options.split()
         if len(options) < 1:
-            self._reply(update)
+            self._reply(update, self.error_reply[0])
         else:
             result = determine(options, question)
             self._reply(update, result)
 
+# Command Handler: /tells
     def tells(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
         question, options = split_question(context.args)
         if question is None or options is None:
-            self._reply(update)
+            self._reply(update, self.error_reply[0])
             return
         options = options.split()
         if len(options) < 1:
-            self._reply(update)
+            self._reply(update, self.error_reply[0])
         else:
             result = determine(options, question, sort=True)
             self._reply(update, result)    
 
+# Command Handler: /shuffle
     def shuffle(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
         if len(context.args) < 2:
-            self._reply(update)
+            self._reply(update, self.error_reply[len(context.args)])
         else:
             np.random.shuffle(context.args)
             result = ' '.join(context.args)
             self._reply(update, result)
 
+# Command Handler: /pair
     def pair(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return 
         source, target = split_question(context.args)
         if source is None or target is None:
-            self._reply(update)
+            self._reply(update, self.error_reply[0])
             return
         source = source.split()
         target = target.split()
@@ -174,39 +189,112 @@ class CDInfoBot:
         result = ''.join([ '\n'+src+' - '+tar for src,tar in zip(source, target)])
         self._reply(update, result)
 
+# Command Handler: /dice
+    def dice(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        if len(context.args) == 0:
+            update.message.reply_dice(emoji=tg.constants.DICE_DICE)
+            return
+        if len(context.args) < 2 or not str.isdigit(context.args[0]) or not str.isdigit(context.args[1]):
+            self._reply(update, self.error_reply[0])
+            return
+        guess = int(context.args[0])
+        if guess <= 0 or guess > 6:
+            self._reply(update, "你就這麼想輸嗎？🤔")
+            return
+
+        wager = int(context.args[1])
+        dice_message = update.message.reply_dice(emoji=tg.constants.DICE_DICE)
+        time.sleep(5)
+        if guess == dice_message.dice.value:
+            update.message.reply_text(f"猜中了！{update.message.from_user.full_name} 贏得{wager*5}顆 島幣")
+        else:
+            update.message.reply_text(f"沒猜中呦")
+
+# Command Handler: /count
+    def count(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        if len(context.args) < 1 or not str.isdigit(context.args[0]):
+            self._reply(update, self.error_reply[0])
+            return
+        cd_time = int(context.args[0])
+        if cd_time <= 0 or cd_time > 20:
+            self._reply(update, self.error_reply[1])
+            return
+        count_message = update.message.reply_text(f"⏱ {context.args[0]}")
+        while cd_time:
+            time.sleep(1)
+            cd_time -= 1
+            update.message.bot.edit_message_text(chat_id=update.message.chat.id,
+                                                 message_id=count_message.message_id,
+                                                 text=f"⏱ {cd_time}")
+        update.message.reply_text("GO GO 🤩")
+
+# Message Handler: show
     def show(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
-        if np.random.randint(0,25) == 0 and not self.envelope_state:
-            self.envelope_state = True
-            keyboard = [[tg.InlineKeyboardButton(callback_data=round(np.random.normal(20,5)), text='領取')]]
+        if np.random.randint(0,self.p_possi) == 0:
+            keyboard = [[tg.InlineKeyboardButton(callback_data=int(round(np.random.normal(self.p_mean,self.p_std))), text='領取')]]
             reply_markup = tg.InlineKeyboardMarkup(keyboard)
-            update.message.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")
+            envelope_msg = update.message.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")
 
+# Callback Query Handler: envelope
     def envelope(self, update: Update, context: CallbackContext) -> None:
         query = update.callback_query
         query.answer()
-        if self.envelope_state:
-            query.edit_message_text(f"{query.from_user.full_name} 收到{query.data}顆 島幣")
-            self.envelope_state = False
+        if query.message.message_id not in self.envelopes:
+            money = int(query.data)
+            if money <= 0:
+                query.edit_message_text(f"{query.from_user.full_name} 收到一顆 {np.random.choice(self.sorry_reply)}")
+            else:
+                money_str = "{:,}".format(money)
+                query.edit_message_text(f"{query.from_user.full_name} 收到{money_str}顆 島幣")
+            self.envelopes.append(query.message.message_id)
 
-    def dice(self, update: Update, context: CallbackContext) -> None:
-        update.message.reply_dice(emoji=tg.constants.DICE_DICE)
-
-    def dice_value(self, update: Update, context: CallbackContext) -> None:
-        print(update.message.dice.value)
-
+# Command Handler: /sleep (owner only)
     def sleep(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
             update.message.reply_text("zzz")
             os.kill(os.getpid(), signal.SIGINT)
+
+# Command Handler: /status (owner only)
+    def status(self, update: Update, context: CallbackContext) -> None:
+        if update.message.from_user.id == self.owner:
+            update.message.reply_text(f"envelopes: {len(self.envelopes)}")
+
+# Command Handler: /clear (owner only)
+    def clear(self, update: Update, context: CallbackContext) -> None:
+        if update.message.from_user.id == self.owner:
+            self.envelopes = []
+            update.message.reply_text(f"envelopes: {len(self.envelopes)}")
+
+# Command Handler: /param (owner only)
+    def param(self, update: Update, context: CallbackContext) -> None:
+        if update.message.from_user.id == self.owner:
+            if len(context.args) == 0:
+                update.message.reply_text(''.join([f"\n{key} = {value}" for key,value in self.__dict__.items() if 'p_' in key]))
+            elif len(context.args) == 1 and context.args[0] in self.__dict__:
+                update.message.reply_text(f"{context.args[0]} = {self.__dict__[context.args[0]]}")
+            elif len(context.args) == 2 and context.args[0] in self.__dict__ and 'p_' in context.args[0]:
+                self.__dict__[context.args[0]] = int(context.args[1])
+                update.message.reply_text(f"{context.args[0]} = {self.__dict__[context.args[0]]}")
+            else:
+                update.message.reply_text('command error')
 
 #-------------------------------------------------------------------
 #   main
 #-------------------------------------------------------------------
 def main():
 
-    bot_token = parse_token('token_CD_info_bot')
+    bot_list = (('token_CD_info_bot', 'Island Bot'),
+               ('token_Justa_test_bot', 'Test Bot'))
+
+    which = 0
+
+    bot_token = parse_token(bot_list[which][0])
     if not bot_token:
         print("[bot token file not found]")
         return
@@ -216,7 +304,7 @@ def main():
         print("[owner id file not found]")
         return
     
-    bot_name = 'Island Bot'
+    bot_name = bot_list[which][1]
 
     bot = CDInfoBot(bot_token=bot_token,
                     bot_owner=bot_owner,
