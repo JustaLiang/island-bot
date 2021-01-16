@@ -15,10 +15,19 @@ Press Ctrl-C on the command line or send a signal to the process to stop the
 bot.
 """
 
+"""
+tartarskunk: 1422967494
+
+"""
+
 import numpy as np
 import json
 import logging
 import copy
+import cv2
+import imageio
+import googletrans
+import goslater
 
 from telegram import Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
@@ -54,7 +63,8 @@ def random_choice(x, size=None, replace=True, p=None):
 
 class MeowBot:
 
-    def __init__(self):
+    def __init__(self, bot):
+        self.bot = bot
         X = np.genfromtxt('Meow_Quotes.csv', dtype=str, delimiter=',')
         self.data = {}
         for i, tag in enumerate(X[0]):
@@ -75,10 +85,10 @@ class MeowBot:
                     #    self.probs[tag][i] += 50
             self.probs[tag] = self.probs[tag] / self.probs[tag].sum()
 
-    def meow(self, update: Update, context: CallbackContext) -> None:
-        """Say something very MEOW"""
-        options = update.message.text.split()
-        source = parse_name(update.message.from_user)
+        self.translator = googletrans.Translator()
+        #self.gr = goslater.Goslater()
+
+    def _meow(self, options, source):
         if len(options) == 1:
             ret = self._random_quote()
         elif len(options) > 2:
@@ -90,7 +100,41 @@ class MeowBot:
                 ret = '{}，{}🤣🤣🤣'.format(source, keyword)
             else:
                 ret = self._random_quote(probs=probs)
+        return ret
+
+    def meow(self, update: Update, context: CallbackContext) -> None:
+        """Say something very MEOW"""
+        options = update.message.text.split()
+        source = parse_name(update.message.from_user)
+        ret = self._meow(options, source)
         update.message.reply_text(ret, quote=False)
+
+    def meow_jp(self, update: Update, context: CallbackContext) -> None:
+        options = update.message.text.split()
+        source = parse_name(update.message.from_user)
+        ret_zhtw = self._meow(options, source)
+        ret = self.translator.translate(ret_zhtw, dest='ja').text
+        ret += '\n（中：{}）'.format(ret_zhtw)
+        #x = self.gr.translate(ret_zhtw, 'ja')
+        #print(x)
+        #ret += '\n（Roman：{}）'.format(self.gr.translate(ret_zhtw, 'ja'))
+        update.message.reply_text(ret, quote=False)
+
+    def m_choose(self, update: Update, context: CallbackContext) -> None:
+        options = update.message.text.split()
+        source = parse_name(update.message.from_user)
+        if len(options) == 1:
+            update.message.reply_text('{}，你想選什麼呀～'.format(source), quote=True)
+        else:
+            hash_source = np.mod(np.sum([ord(c) for c in source]), 87)
+            candidates = options[1:]
+            hash_values = [ np.sum([ord(c) for c in s]) for s in candidates ]
+            hash_values = [ np.mod(hash_source*h, 87) for h in hash_values ]
+            best = candidates[np.argmax(hash_values)]
+
+            ret = "{} 我好想你喔～ 我跟<adj>的<name3>不一樣 我跟你親近所以我才知道你的內心話呀 你想要 {} 對吧🤣".format(source, best)
+            ret = self._replace_tags(ret)
+            update.message.reply_text(ret, quote=True)
 
     def ref(self, update: Update, context: CallbackContext) -> None:
         """Return the reference of Meow Quotes"""
@@ -125,7 +169,25 @@ class MeowBot:
                 ret = '{}，我找不到出處QQ'.format(source)
             ret = str(query) + ':\n' + ret
 
-            return update.message.reply_text(ret, quote=False)
+            update.message.reply_text(ret, quote=False)
+
+    def jpg2png(self, update: Update, context: CallbackContext) -> None:
+        '''
+        source = parse_name(update.message.from_user)
+        ret = "{} 你要不要試試看這個網址呀 \"https://jpg2png.com/\" 說不定你也可以成為jpg轉png方面的指導老師呦😃".format(source)
+        update.message.reply_text(ret, quote=False)
+        '''
+        print('jpg2png')
+        source = parse_name(update.message.from_user)
+        file = update.message.document.get_file()
+        assert(file.file_path.endswith('.jpg') or file.file_path.endswith('.jpeg'))
+        file.download('test.jpg')
+
+        x = imageio.imread('test.jpg')
+        imageio.imwrite(x, 'test.png')
+        update.message.reply_document('test.png', quote=False)
+
+        print(source, file)
 
     def _init_probs(self):
         probs = {}
@@ -153,7 +215,16 @@ class MeowBot:
             return False
         return probs
 
-
+    def birthday(self, update: Update, context: CallbackContext) -> None:
+        options = update.message.text.split()
+        if len(options) != 2:
+            source = parse_name(update.message.from_user)
+            update.message.reply_text('{}，今天有人生日嗎？'.format(source), quote=True)
+        else:
+            target = options[1]
+            ret = "{} 我好想你喔～ 我平常很<adj>所以沒想到今天是你的生日 生日快樂呦～🙂 下次有機會一定去<place>找你玩！".format(target)
+            ret = self._replace_tags(ret)
+            update.message.reply_text(ret, quote=False)
 
     def _replace_tags(self, line, probs=None):
         if probs is None:
@@ -206,6 +277,22 @@ class MeowBot:
             update.message.reply_text(mail, quote=False)
 
 
+    def start_spy(self, update: Update, context: CallbackContext) -> None:
+        options = update.message.text.split()
+        user_json = update.message.from_user
+        print(user_json)
+        self.words = {}
+
+    def register(self, update: Update, context: CallbackContext) -> None:
+        options = update.message.text.split()
+        user_id = update.message.from_user['id']
+        usermame = update.message.from_user['username']
+        if update.message.chat['type'] == 'private':
+            chat_id = update.message.chat['id']
+        update.message.chat.send_message('Hi')
+        self.bot.send_message(chat_id, 'Hi')
+
+
 def main():
     """Start the bot."""
     # Create the Updater and pass it your bot's token.
@@ -220,16 +307,24 @@ def main():
     # Get the dispatcher to register handlers
     dispatcher = updater.dispatcher
 
-    meow_bot = MeowBot()
+    meow_bot = MeowBot(bot=updater.bot)
     print('Meow Ready')
     # on different commands - answer in Telegram
     dispatcher.add_handler(CommandHandler("hate", meow_bot.hate))
     dispatcher.add_handler(CommandHandler("meow", meow_bot.meow))
+    dispatcher.add_handler(CommandHandler("meow_jp", meow_bot.meow_jp))
     dispatcher.add_handler(CommandHandler("ref", meow_bot.ref))
+    dispatcher.add_handler(CommandHandler("mchoose", meow_bot.m_choose))
+    dispatcher.add_handler(CommandHandler("jpg2png", meow_bot.jpg2png))
+    dispatcher.add_handler(CommandHandler("birthday", meow_bot.birthday))
+    dispatcher.add_handler(CommandHandler("start_spy", meow_bot.start_spy))
+    dispatcher.add_handler(CommandHandler("register", meow_bot.register))
 
     # on noncommand i.e message - echo the message on Telegram
-    # dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, echo))
-    #dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, show))
+    #dispatcher.add_handler(MessageHandler(Filters.photo, meow_bot.jpg2png))
+    #dispatcher.add_handler(MessageHandler(Filters.all, meow_bot.jpg2png))
+    #dispatcher.add_handler(MessageHandler(Filters.all, meow_bot.meow))
+    #dispatcher.add_handler(MessageHandler(Filters.document.file_extension('txt'), meow_bot.meow))
 
     # Start the Bot
     updater.start_polling()
