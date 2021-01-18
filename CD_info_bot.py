@@ -97,6 +97,7 @@ class CDInfoBot:
         dpr.add_handler(tx.CommandHandler('clear', self.clear))
         dpr.add_handler(tx.CommandHandler('param', self.param))
         dpr.add_handler(tx.CommandHandler('save', self.save))
+        dpr.add_handler(tx.CommandHandler('reward', self.reward))
         #--------------------------------------------------------
         dpr.add_handler(tx.MessageHandler(tx.Filters.all, self.show))
         dpr.add_handler(tx.CallbackQueryHandler(self.envelope, pattern='envelope'))
@@ -263,7 +264,8 @@ class CDInfoBot:
             return
         id_str = str(update.message.from_user.id)
         if id_str in self.user_balance:
-            self._reply(update, f"{update.message.from_user.full_name} 擁有{self.user_balance[id_str]}顆 島幣")
+            balance = "{:,}".format(self.user_balance[id_str])
+            self._reply(update, f"{update.message.from_user.full_name} 擁有{balance}顆 島幣")
         else:
             self._reply(update, f"{update.message.from_user.full_name} 擁有0顆 島幣")
 
@@ -291,7 +293,7 @@ class CDInfoBot:
     def show(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
-        if update.message.chat.type == 'private' and np.random.randint(0,self.p_possi) == 0:
+        if update.message.chat.type != 'private' and np.random.randint(0,self.p_possi) == 0:
             money_str = str(round(np.random.normal(self.p_mean,self.p_std)))
             keyboard = [[tg.InlineKeyboardButton(callback_data=f'envelope{money_str}', text='領取🧧')]]
             reply_markup = tg.InlineKeyboardMarkup(keyboard)
@@ -301,7 +303,7 @@ class CDInfoBot:
     def envelope(self, update: Update, context: CallbackContext) -> None:
         query = update.callback_query
         if query.message.message_id not in self.envelopes:
-            query.answer("搶到啦😁")
+            query.answer(text="搶到啦😁")
             money = int(query.data.replace('envelope',''))
             if money <= 0:
                 query.edit_message_text(f"{query.from_user.full_name} 收到一顆 {np.random.choice(self.sorry_reply)}")
@@ -311,7 +313,7 @@ class CDInfoBot:
                 self._balance_change(query.from_user.id, money)
             self.envelopes.append(query.message.message_id)
         else:
-            query.answer("沒搶到🙁")
+            query.answer(text="沒搶到🙁")
 
 # Command Handler: /sleep (owner only)
     def sleep(self, update: Update, context: CallbackContext) -> None:
@@ -352,6 +354,20 @@ class CDInfoBot:
                 self._reply_owner(update, balances_str)
             with open(self.balance_file, 'w', encoding='utf8') as outfile:
                 json.dump(self.user_balance, outfile, indent=4, ensure_ascii=False)
+
+# Command Handler: /reward (owner only)
+    def reward(self, update: Update, context: CallbackContext) -> None:
+        if update.message.from_user.id == self.owner:
+            if len(context.args) == 2 and context.args[0] in self.user_balance:
+                try:
+                    change = int(context.args[1])
+                except:
+                    self._reply_owner(update, 'command error')
+                    return
+                self._balance_change(context.args[0], change)
+                self.save(update, context)
+            else:
+                self._reply_owner(update, 'command error')
 
 #-------------------------------------------------------------------
 #   main
