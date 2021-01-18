@@ -63,7 +63,7 @@ class CDInfoBot:
         self.name = bot_name
         self.balance_file = balance_file
         self.error_reply = ['🤯','😐']
-        self.sorry_reply = ['🍑','🍓','🍎','🍊','💣']
+        self.sorry_reply = ['🍑','🍓','🍎','🍊']
         self.envelopes = []
         self.user_balance = {}
         self.p_possi = 25
@@ -91,7 +91,7 @@ class CDInfoBot:
         #--------------------------------------------------------
         dpr.add_handler(MessageHandler(Filters.all, self.show))
         dpr.add_handler(CallbackQueryHandler(self.envelope))
-        print(f"[{self.name} ready]")
+        print(f"[{self.name} handler ready]")
 
         try:
             self.user_balance = json.load(open(self.balance_file, 'r', encoding='utf8'))
@@ -234,11 +234,12 @@ class CDInfoBot:
         wager = int(context.args[1])
         if not self._balance_change(user.id, -wager):
             update.message.reply_text(f"你錢不夠耶😶")
+            return
 
         dice_message = update.message.reply_dice(emoji=tg.constants.DICE_DICE)
-        time.sleep(3)
+        time.sleep(4)
         if guess == dice_message.dice.value:
-            update.message.bot.edit_message_text(f"猜中了！{user.full_name} 贏得{wager*5}顆 島幣")
+            update.message.reply_text(f"猜中了！{user.full_name} 贏得{wager*5}顆 島幣")
             self._balance_change(user.id, wager*6) 
         else:
             update.message.reply_text(f"沒猜中呦")
