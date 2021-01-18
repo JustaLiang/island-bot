@@ -57,13 +57,15 @@ def split_question(str_list):
 
 # Bot class
 class CDInfoBot:
-    def __init__(self, bot_token, bot_owner, bot_name):
+    def __init__(self, bot_token, bot_owner, bot_name, balance_file):
         self.token = bot_token
         self.owner = bot_owner
         self.name = bot_name
+        self.balance_file = balance_file
         self.error_reply = ['🤯','😐']
         self.sorry_reply = ['🍑','🍓','🍎','🍊','💣']
         self.envelopes = []
+        self.user_balance = {}
         self.p_possi = 25
         self.p_mean = 4
         self.p_std = 2
@@ -77,6 +79,7 @@ class CDInfoBot:
         dpr.add_handler(CommandHandler("tells", self.tells))
         dpr.add_handler(CommandHandler("shuffle", self.shuffle))
         dpr.add_handler(CommandHandler("pair", self.pair))
+        dpr.add_handler(CommandHandler("balance", self.balance))
         dpr.add_handler(CommandHandler("dice", self.dice, run_async=True))
         dpr.add_handler(CommandHandler("count", self.count, run_async=True))
         #--------------------------------------------------------
@@ -84,10 +87,18 @@ class CDInfoBot:
         dpr.add_handler(CommandHandler("status", self.status))
         dpr.add_handler(CommandHandler("clear", self.clear))
         dpr.add_handler(CommandHandler("param", self.param))
+        dpr.add_handler(CommandHandler("save", self.save))
         #--------------------------------------------------------
         dpr.add_handler(MessageHandler(Filters.all, self.show))
         dpr.add_handler(CallbackQueryHandler(self.envelope))
         print(f"[{self.name} ready]")
+
+        try:
+            self.user_balance = json.load(open(self.balance_file, 'r', encoding='utf8'))
+            print(f"[{self.name} load balance file]")
+        except:
+            print(f"[{self.name} no balance file]")
+            pass
 
     def run(self):
         self.updater.start_polling(poll_interval=1, clean=True)
@@ -104,7 +115,22 @@ class CDInfoBot:
 
     def _reply(self, update, content):
         update.message.reply_text(content)
-        print(self.name, ':', content)   
+        print(self.name, ':', content)
+
+    def _balance_change(self, user_id, change):
+        id_str = str(user_id)
+        if change >= 0:
+            if id_str in self.user_balance:
+                self.user_balance[id_str] += change
+            else:
+                self.user_balance[id_str] = change
+            return True
+        else:
+            if id_str in self.user_balance and self.user_balance[id_str] >= -change:
+                self.user_balance[id_str] += change
+                return True
+            else:
+                return False
 
 # Command Handler: /start
     def start(self, update: Update, context: CallbackContext) -> None:
@@ -204,13 +230,28 @@ class CDInfoBot:
             self._reply(update, "你就這麼想輸嗎？🤔")
             return
 
+        user = update.message.from_user
         wager = int(context.args[1])
+        if not self._balance_change(user.id, -wager):
+            update.message.reply_text(f"你錢不夠耶😶")
+
         dice_message = update.message.reply_dice(emoji=tg.constants.DICE_DICE)
-        time.sleep(5)
+        time.sleep(3)
         if guess == dice_message.dice.value:
-            update.message.reply_text(f"猜中了！{update.message.from_user.full_name} 贏得{wager*5}顆 島幣")
+            update.message.bot.edit_message_text(f"猜中了！{user.full_name} 贏得{wager*5}顆 島幣")
+            self._balance_change(user.id, wager*6) 
         else:
             update.message.reply_text(f"沒猜中呦")
+
+# Command Handler: /balance
+    def balance(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        id_str = str(update.message.from_user.id)
+        if id_str in self.user_balance:
+            update.message.reply_text(f"{update.message.from_user.full_name} 擁有{self.user_balance[id_str]}顆 島幣")
+        else:
+            update.message.reply_text(f"{update.message.from_user.full_name} 擁有0顆 島幣")
 
 # Command Handler: /count
     def count(self, update: Update, context: CallbackContext) -> None:
@@ -252,11 +293,13 @@ class CDInfoBot:
             else:
                 money_str = "{:,}".format(money)
                 query.edit_message_text(f"{query.from_user.full_name} 收到{money_str}顆 島幣")
+                self._balance_change(query.from_user.id, money)
             self.envelopes.append(query.message.message_id)
 
 # Command Handler: /sleep (owner only)
     def sleep(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
+            self.save(update, context)
             update.message.reply_text("zzz")
             os.kill(os.getpid(), signal.SIGINT)
 
@@ -284,13 +327,22 @@ class CDInfoBot:
             else:
                 update.message.reply_text('command error')
 
+# Command Handler: /save (owner only)
+    def save(self, update: Update, context: CallbackContext) -> None:
+        if update.message.from_user.id == self.owner:
+            balances_str = ''.join([f'\n{user} : {balance}' for user,balance in self.user_balance.items()])
+            if balances_str:
+                update.message.bot.send_message(chat_id=self.owner, text=balances_str)
+            with open(self.balance_file, 'w', encoding='utf8') as outfile:
+                json.dump(self.user_balance, outfile, indent=4, ensure_ascii=False)
+
 #-------------------------------------------------------------------
 #   main
 #-------------------------------------------------------------------
 def main():
 
-    bot_list = (('token_CD_info_bot', 'Island Bot'),
-               ('token_Justa_test_bot', 'Test Bot'))
+    bot_list = (('token_CD_info_bot', 'Island Bot', 'island_balance.json'),
+               ('token_Justa_test_bot', 'Test Bot', 'test_balance.json'))
 
     which = 0
 
@@ -308,7 +360,8 @@ def main():
 
     bot = CDInfoBot(bot_token=bot_token,
                     bot_owner=bot_owner,
-                    bot_name=bot_name)
+                    bot_name=bot_name,
+                    balance_file=bot_list[which][2])
     bot.run()
 
 if __name__ == '__main__':
