@@ -67,10 +67,12 @@ class BetGame:
     def __init__(self, host, description, options):
         self.host = host
         self.description = description
-        self.options = dict(zip(options, [{'detail':{}, 'bet':0, 'odd':''}]*len(options)))
+        self.options = dict(zip(options, [{'detail':{}, 'bet':0, 'odd':''} for _ in range(len(options))]))
         self.total = 0
         self.closed = False
-        self.markup = tg.InlineKeyboardMarkup([[tg.InlineKeyboardButton(callback_data=f'gamble {host} {opt} {col}', text=f'{col}') for col in [opt,1,5,10,50]] for opt in self.options])
+        inline_keyboard = [[tg.InlineKeyboardButton(text=txt, callback_data=f'gamble:{opt}:{stk}') for txt,stk in [(opt,-1),('1',1),('5',5),('10',10),('50',50)]] for opt in self.options]
+        inline_keyboard.append([tg.InlineKeyboardButton(text='關閉', callback_data=f'gamble')])
+        self.markup = tg.InlineKeyboardMarkup(inline_keyboard)
 
     def stake_on(self, gamer, option, wager):
         if self.closed or option not in self.options:
@@ -84,20 +86,24 @@ class BetGame:
         self.total += wager
         for opt in self.options:
             if self.options[opt]['bet'] > 0:
-                self.options[opt]['odd'] = '%.3f'%(self.total/self.options[opt])
+                self.options[opt]['odd'] = '%.3f'%(self.total/self.options[opt]['bet'])
 
-    def get_display(self):
-        return self.description
-                + ''.join([f'\n{opt}: {self.options[opt]['bet']} ({self.options[opt]['odd']})' for opt in self.options])
-                , None if self.closed else self.markup
+    def get_text(self):
+        return self.description+''.join([f"\n{opt}: {self.options[opt]['bet']} ({self.options[opt]['odd']})" for opt in self.options])
+
+    def get_button(self):
+        return self.markup
 
     def close(self):
+        inline_keyboard = [[tg.InlineKeyboardButton(text=opt, callback_data=f'gamble:{opt}')] for opt in self.options]
+        self.markup = tg.InlineKeyboardMarkup(inline_keyboard) 
         self.closed = True
 
     def settle(self, outcome):
         changes = {}
         for gamer in self.options[outcome]['detail']:
             changes[gamer] = int(self.total*self.options[outcome]['detail'][gamer]/self.options[outcome]['bet'])
+        self.markup = None
         return changes
 
 
@@ -130,11 +136,10 @@ class CDInfoBot:
         dpr.add_handler(tx.CommandHandler('count',  self.count, run_async=True))
         #--------------------------------------------------------
         dpr.add_handler(tx.CommandHandler('balance',self.balance))
-        dpr.add_handler(tx.MessageHandler(tx.Filters.all, self.show))
-        dpr.add_handler(tx.CallbackQueryHandler(self.envelope, pattern='envelope'))
         dpr.add_handler(tx.CommandHandler('dice',   self.dice,  run_async=True))
-        dpr.add_handler(tx.CommandHandler('gamble', self.gamble))
         dpr.add_handler(tx.CallbackQueryHandler(self.gamble_action, pattern='gamble'))
+        dpr.add_handler(tx.CallbackQueryHandler(self.envelope, pattern='envelope'))
+        dpr.add_handler(tx.CommandHandler('gamble', self.gamble))
         #--------------------------------------------------------
         dpr.add_handler(tx.CommandHandler('sleep',  self.sleep))
         dpr.add_handler(tx.CommandHandler('status', self.status))
@@ -143,6 +148,7 @@ class CDInfoBot:
         dpr.add_handler(tx.CommandHandler('save',   self.save))
         dpr.add_handler(tx.CommandHandler('reward', self.reward))
         #--------------------------------------------------------
+        dpr.add_handler(tx.MessageHandler(tx.Filters.all, self.show))
         print(f"[{self.name} handler ready]")
 
         try:
@@ -316,7 +322,7 @@ class CDInfoBot:
             return
         if update.message.chat.type != 'private' and np.random.randint(0,self.p_possi) == 0:
             money_str = str(round(np.random.normal(self.p_mean,self.p_std)))
-            keyboard = [[tg.InlineKeyboardButton(callback_data=f'envelope{money_str}', text='領取🧧')]]
+            keyboard = [[tg.InlineKeyboardButton(callback_data=f'envelope:{money_str}', text='領取🧧')]]
             reply_markup = tg.InlineKeyboardMarkup(keyboard)
             update.message.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")
 
@@ -325,7 +331,7 @@ class CDInfoBot:
         query = update.callback_query
         if query.message.message_id not in self.envelopes:
             query.answer(text="搶到啦😁")
-            money = int(query.data.replace('envelope',''))
+            money = int(query.data.split(':')[1])
             if money <= 0:
                 query.edit_message_text(f"{query.from_user.full_name} 收到一顆 {np.random.choice(self.sorry_reply)}")
             else:
@@ -367,16 +373,54 @@ class CDInfoBot:
 
 # Command Handler: /gamble
     def gamble(self, update: Update, context: CallbackContext) -> None:
-        m = update.message
-        game_id = f'{m.chat.id}:{m.message_id}'
-        self.bet_games[game_id] = BetGame(m.from_user.id, context.args[0], context.args[1:])
+        bet_game = BetGame(update.message.from_user.id, context.args[0], context.args[1:])
+        game_msg = update.message.reply_text(text=bet_game.get_text(), reply_markup=bet_game.get_button())
+        game_id = f'{game_msg.chat.id}:{game_msg.message_id}'
+        self.bet_games[game_id] = bet_game
 
 # Callback Query Handler: gamble_action
     def gamble_action(self, update: Update, context: CallbackContext) -> None:
         query = update.callback_query
-        m = query.message
-        game_id = f'{m.chat.id}:{m.message_id}'
-        # TODO
+        game_id = f'{query.message.chat.id}:{query.message.message_id}'
+        if game_id not in self.bet_games:
+            query.answer(text="賭局無效")
+            return
+        game = self.bet_games[game_id]
+        struct = query.data.split(':')
+        gamer = query.from_user.id
+        host = game.host
+        act = len(struct)
+        changes = None
+        # betting
+        if act == 3:
+            stk = int(struct[2])
+            if stk > 0:
+                game.stake_on(gamer,struct[1],stk)
+                query.answer(text="下注成功")
+                query.edit_message_text(text=game.get_text(), reply_markup=game.get_button())
+            else:
+                query.answer(text="無效按鈕")
+        # close
+        elif act == 1:
+            if gamer == host:
+                game.close()
+                query.answer(text="關閉賭局")
+                query.edit_message_text(text=game.get_text(), reply_markup=game.get_button())
+            else:
+                query.answer(text="你不是莊家")
+        # settle
+        elif act == 2:
+            if gamer == host:
+                changes = game.settle(struct[1])
+                query.answer(text="結算成功")
+                query.edit_message_text(text=game.get_text(), reply_markup=game.get_button())
+            else:
+                query.answer(text="你不是莊家")
+
+        if changes:
+            query.message.reply_text(''.join([f'\n{gamer} get {money}' for gamer,money in changes.items()]))
+            del game
+        query.answer()
 
 
 # control
@@ -444,7 +488,7 @@ def main():
     bot_list = (('token_CD_info_bot', 'Island Bot', 'island_balance.json'),
                ('token_Justa_test_bot', 'Test Bot', 'test_balance.json'))
 
-    which = 0
+    which = 1
 
     bot_token = parse_token(bot_list[which][0])
     if not bot_token:
