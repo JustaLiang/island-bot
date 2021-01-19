@@ -63,6 +63,43 @@ def split_question(str_list):
 
     return qsn_opt[0], qsn_opt[1]
 
+class BetGame:
+    def __init__(self, host, description, options):
+        self.host = host
+        self.description = description
+        self.options = dict(zip(options, [{'detail':{}, 'bet':0, 'odd':''}]*len(options)))
+        self.total = 0
+        self.closed = False
+        self.markup = tg.InlineKeyboardMarkup([[tg.InlineKeyboardButton(callback_data=f'gamble {host} {opt} {col}', text=f'{col}') for col in [opt,1,5,10,50]] for opt in self.options])
+
+    def stake_on(self, gamer, option, wager):
+        if self.closed or option not in self.options:
+            return None
+        gamer = str(gamer)
+        if gamer in self.options[option]['detail']:
+            self.options[option]['detail'][gamer] += wager
+        else:
+            self.options[option]['detail'][gamer] = wager
+        self.options[option]['bet'] += wager
+        self.total += wager
+        for opt in self.options:
+            if self.options[opt]['bet'] > 0:
+                self.options[opt]['odd'] = '%.3f'%(self.total/self.options[opt])
+
+    def get_display(self):
+        return self.description
+                + ''.join([f'\n{opt}: {self.options[opt]['bet']} ({self.options[opt]['odd']})' for opt in self.options])
+                , None if self.closed else self.markup
+
+    def close(self):
+        self.closed = True
+
+    def settle(self, outcome):
+        changes = {}
+        for gamer in self.options[outcome]['detail']:
+            changes[gamer] = int(self.total*self.options[outcome]['detail'][gamer]/self.options[outcome]['bet'])
+        return changes
+
 
 # Bot class
 class CDInfoBot:
@@ -72,35 +109,40 @@ class CDInfoBot:
         self.name = bot_name
         self.balance_file = balance_file
         self.error_reply = ['🤯','😐']
-        self.sorry_reply = ['🍑','🍓','🍎','🍊']
+        self.sorry_reply = ['🍑','🍓','🍎','🍊','🥭','🍍','🍅','🍈','🍋','🍐']
         self.envelopes = []
         self.user_balance = {}
+        self.bet_games = {}
         self.p_possi = 25
         self.p_mean = 4
         self.p_std = 2
 
         self.updater = tx.Updater(self.token, use_context=True)
         dpr = self.updater.dispatcher
-        dpr.add_handler(tx.CommandHandler('start', self.start))
+        #--------------------------------------------------------
+        dpr.add_handler(tx.CommandHandler('start',  self.start))
         dpr.add_handler(tx.CommandHandler('choose', self.choose))
         dpr.add_handler(tx.CommandHandler('random', self.random))
-        dpr.add_handler(tx.CommandHandler('tell', self.tell))
-        dpr.add_handler(tx.CommandHandler('tells', self.tells))
-        dpr.add_handler(tx.CommandHandler('shuffle', self.shuffle))
-        dpr.add_handler(tx.CommandHandler('pair', self.pair))
-        dpr.add_handler(tx.CommandHandler('balance', self.balance))
-        dpr.add_handler(tx.CommandHandler('dice', self.dice, run_async=True))
-        dpr.add_handler(tx.CommandHandler('count', self.count, run_async=True))
+        dpr.add_handler(tx.CommandHandler('tell',   self.tell))
+        dpr.add_handler(tx.CommandHandler('tells',  self.tells))
+        dpr.add_handler(tx.CommandHandler('shuffle',self.shuffle))
+        dpr.add_handler(tx.CommandHandler('pair',   self.pair))
+        dpr.add_handler(tx.CommandHandler('count',  self.count, run_async=True))
         #--------------------------------------------------------
-        dpr.add_handler(tx.CommandHandler('sleep', self.sleep))
-        dpr.add_handler(tx.CommandHandler('status', self.status))
-        dpr.add_handler(tx.CommandHandler('clear', self.clear))
-        dpr.add_handler(tx.CommandHandler('param', self.param))
-        dpr.add_handler(tx.CommandHandler('save', self.save))
-        dpr.add_handler(tx.CommandHandler('reward', self.reward))
-        #--------------------------------------------------------
+        dpr.add_handler(tx.CommandHandler('balance',self.balance))
         dpr.add_handler(tx.MessageHandler(tx.Filters.all, self.show))
         dpr.add_handler(tx.CallbackQueryHandler(self.envelope, pattern='envelope'))
+        dpr.add_handler(tx.CommandHandler('dice',   self.dice,  run_async=True))
+        dpr.add_handler(tx.CommandHandler('gamble', self.gamble))
+        dpr.add_handler(tx.CallbackQueryHandler(self.gamble_action, pattern='gamble'))
+        #--------------------------------------------------------
+        dpr.add_handler(tx.CommandHandler('sleep',  self.sleep))
+        dpr.add_handler(tx.CommandHandler('status', self.status))
+        dpr.add_handler(tx.CommandHandler('clear',  self.clear))
+        dpr.add_handler(tx.CommandHandler('param',  self.param))
+        dpr.add_handler(tx.CommandHandler('save',   self.save))
+        dpr.add_handler(tx.CommandHandler('reward', self.reward))
+        #--------------------------------------------------------
         print(f"[{self.name} handler ready]")
 
         try:
@@ -108,13 +150,15 @@ class CDInfoBot:
             print(f"[{self.name} load balances]")
         except:
             print(f"[{self.name} no balances]")
-        pass
 
     def run(self):
         self.updater.start_polling(poll_interval=1, clean=True)
         print(f"[{self.name} running]")
         self.updater.idle()
         print(f"[{self.name} terminated]")
+
+# private functions        
+####################################################################################
 
     def _valid_update(self, update):
         if update.message is None:
@@ -145,6 +189,9 @@ class CDInfoBot:
                 return True
             else:
                 return False
+
+# question
+####################################################################################
 
 # Command Handler: /start
     def start(self, update: Update, context: CallbackContext) -> None:
@@ -229,6 +276,66 @@ class CDInfoBot:
         result = ''.join([ '\n'+src+' - '+tar for src,tar in zip(source, target)])
         self._reply(update, result)
 
+# Command Handler: /count
+    def count(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        if len(context.args) < 1 or not str.isdigit(context.args[0]):
+            self._reply(update, self.error_reply[0])
+            return
+        cd_time = int(context.args[0])
+        if cd_time <= 0 or cd_time > 20:
+            self._reply(update, self.error_reply[1])
+            return
+        count_message = update.message.reply_text(f"⏱ {context.args[0]}")
+        while cd_time:
+            time.sleep(1)
+            cd_time -= 1
+            update.message.bot.edit_message_text(chat_id=update.message.chat.id,
+                                                 message_id=count_message.message_id,
+                                                 text=f"⏱ {cd_time}")
+        self._reply(update, "GO GO 🤩")
+
+# finance
+####################################################################################
+
+# Command Handler: /balance
+    def balance(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        id_str = str(update.message.from_user.id)
+        if id_str in self.user_balance:
+            balance = "{:,}".format(self.user_balance[id_str])
+            self._reply(update, f"{update.message.from_user.full_name} 擁有{balance}顆 島幣")
+        else:
+            self._reply(update, f"{update.message.from_user.full_name} 擁有0顆 島幣")
+
+# Message Handler: show
+    def show(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        if update.message.chat.type != 'private' and np.random.randint(0,self.p_possi) == 0:
+            money_str = str(round(np.random.normal(self.p_mean,self.p_std)))
+            keyboard = [[tg.InlineKeyboardButton(callback_data=f'envelope{money_str}', text='領取🧧')]]
+            reply_markup = tg.InlineKeyboardMarkup(keyboard)
+            update.message.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")
+
+# Callback Query Handler: envelope
+    def envelope(self, update: Update, context: CallbackContext) -> None:
+        query = update.callback_query
+        if query.message.message_id not in self.envelopes:
+            query.answer(text="搶到啦😁")
+            money = int(query.data.replace('envelope',''))
+            if money <= 0:
+                query.edit_message_text(f"{query.from_user.full_name} 收到一顆 {np.random.choice(self.sorry_reply)}")
+            else:
+                money_str = "{:,}".format(money)
+                query.edit_message_text(f"{query.from_user.full_name} 收到{money_str}顆 島幣")
+                self._balance_change(query.from_user.id, money)
+            self.envelopes.append(query.message.message_id)
+        else:
+            query.answer(text="沒搶到🙁")
+
 # Command Handler: /dice
     def dice(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
@@ -258,62 +365,22 @@ class CDInfoBot:
         else:
             self._reply(update, "沒猜中呦😐")
 
-# Command Handler: /balance
-    def balance(self, update: Update, context: CallbackContext) -> None:
-        if not self._valid_update(update):
-            return
-        id_str = str(update.message.from_user.id)
-        if id_str in self.user_balance:
-            balance = "{:,}".format(self.user_balance[id_str])
-            self._reply(update, f"{update.message.from_user.full_name} 擁有{balance}顆 島幣")
-        else:
-            self._reply(update, f"{update.message.from_user.full_name} 擁有0顆 島幣")
+# Command Handler: /gamble
+    def gamble(self, update: Update, context: CallbackContext) -> None:
+        m = update.message
+        game_id = f'{m.chat.id}:{m.message_id}'
+        self.bet_games[game_id] = BetGame(m.from_user.id, context.args[0], context.args[1:])
 
-# Command Handler: /count
-    def count(self, update: Update, context: CallbackContext) -> None:
-        if not self._valid_update(update):
-            return
-        if len(context.args) < 1 or not str.isdigit(context.args[0]):
-            self._reply(update, self.error_reply[0])
-            return
-        cd_time = int(context.args[0])
-        if cd_time <= 0 or cd_time > 20:
-            self._reply(update, self.error_reply[1])
-            return
-        count_message = update.message.reply_text(f"⏱ {context.args[0]}")
-        while cd_time:
-            time.sleep(1)
-            cd_time -= 1
-            update.message.bot.edit_message_text(chat_id=update.message.chat.id,
-                                                 message_id=count_message.message_id,
-                                                 text=f"⏱ {cd_time}")
-        self._reply(update, "GO GO 🤩")
-
-# Message Handler: show
-    def show(self, update: Update, context: CallbackContext) -> None:
-        if not self._valid_update(update):
-            return
-        if update.message.chat.type != 'private' and np.random.randint(0,self.p_possi) == 0:
-            money_str = str(round(np.random.normal(self.p_mean,self.p_std)))
-            keyboard = [[tg.InlineKeyboardButton(callback_data=f'envelope{money_str}', text='領取🧧')]]
-            reply_markup = tg.InlineKeyboardMarkup(keyboard)
-            update.message.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")
-
-# Callback Query Handler: envelope
-    def envelope(self, update: Update, context: CallbackContext) -> None:
+# Callback Query Handler: gamble_action
+    def gamble_action(self, update: Update, context: CallbackContext) -> None:
         query = update.callback_query
-        if query.message.message_id not in self.envelopes:
-            query.answer(text="搶到啦😁")
-            money = int(query.data.replace('envelope',''))
-            if money <= 0:
-                query.edit_message_text(f"{query.from_user.full_name} 收到一顆 {np.random.choice(self.sorry_reply)}")
-            else:
-                money_str = "{:,}".format(money)
-                query.edit_message_text(f"{query.from_user.full_name} 收到{money_str}顆 島幣")
-                self._balance_change(query.from_user.id, money)
-            self.envelopes.append(query.message.message_id)
-        else:
-            query.answer(text="沒搶到🙁")
+        m = query.message
+        game_id = f'{m.chat.id}:{m.message_id}'
+        # TODO
+
+
+# control
+####################################################################################
 
 # Command Handler: /sleep (owner only)
     def sleep(self, update: Update, context: CallbackContext) -> None:
