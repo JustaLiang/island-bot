@@ -133,3 +133,5 @@ token**
 *.token
 *.csv
 DanTarBot.py
+*.txt
+*.backup
