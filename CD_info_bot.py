@@ -6,16 +6,13 @@ from telegram import Update
 import telegram.ext as tx
 from telegram.ext import CallbackContext
 
-from misc import parse_token, parse_id
+from parse import parse_token, parse_id
 import numpy as np
 import json, os, signal, time
-
 # import logging
-# # Enable logging
 # logging.basicConfig(
 #     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.DEBUG
 # )
-
 # logger = logging.getLogger(__name__)
 
 # Functions
@@ -63,25 +60,27 @@ def split_question(str_list):
 
     return qsn_opt[0], qsn_opt[1]
 
+# Sub class
 class BetGame:
     def __init__(self, host, description, options):
         self.host = host
         self.description = description
         self.options = dict(zip(options, [{'detail':{}, 'bet':0, 'odd':''} for _ in range(len(options))]))
+        self.names = {}
         self.total = 0
-        self.closed = False
-        inline_keyboard = [[tg.InlineKeyboardButton(text=txt, callback_data=f'gamble:{opt}:{stk}') for txt,stk in [(opt,-1),('1',1),('5',5),('10',10),('50',50)]] for opt in self.options]
+        inline_keyboard = [[tg.InlineKeyboardButton(text=txt, callback_data=f'gamble:{opt}:{stk}') for txt,stk in [(opt+': 1',1),('5',5),('10',10),('50',50)]] for opt in self.options]
         inline_keyboard.append([tg.InlineKeyboardButton(text='關閉', callback_data=f'gamble')])
         self.markup = tg.InlineKeyboardMarkup(inline_keyboard)
 
     def stake_on(self, gamer, option, wager):
-        if self.closed or option not in self.options:
+        if option not in self.options:
             return None
-        gamer = str(gamer)
-        if gamer in self.options[option]['detail']:
-            self.options[option]['detail'][gamer] += wager
+        gamer_id = str(gamer.id)
+        if gamer_id in self.options[option]['detail']:
+            self.options[option]['detail'][gamer_id] += wager
         else:
-            self.options[option]['detail'][gamer] = wager
+            self.options[option]['detail'][gamer_id] = wager
+            self.names[gamer_id] = gamer.full_name
         self.options[option]['bet'] += wager
         self.total += wager
         for opt in self.options:
@@ -97,15 +96,17 @@ class BetGame:
     def close(self):
         inline_keyboard = [[tg.InlineKeyboardButton(text=opt, callback_data=f'gamble:{opt}')] for opt in self.options]
         self.markup = tg.InlineKeyboardMarkup(inline_keyboard) 
-        self.closed = True
 
     def settle(self, outcome):
         changes = {}
         for gamer in self.options[outcome]['detail']:
             changes[gamer] = int(self.total*self.options[outcome]['detail'][gamer]/self.options[outcome]['bet'])
         self.markup = None
-        return changes
-
+        if changes:
+            display = f'莊家指定結果：{outcome}'+''.join([f'\n{self.names[gamer_id]} 獲得{amount}顆 島幣' for gamer_id,amount in changes.items()])
+        else:
+            display = f'莊家指定結果：{outcome}\n沒有人贏得賭注喔😶'
+        return changes, display
 
 # Bot class
 class CDInfoBot:
@@ -114,7 +115,7 @@ class CDInfoBot:
         self.owner = bot_owner
         self.name = bot_name
         self.balance_file = balance_file
-        self.error_reply = ['🤯','😐']
+        self.error_reply = ['🤯','😐','😐']
         self.sorry_reply = ['🍑','🍓','🍎','🍊','🥭','🍍','🍅','🍈','🍋','🍐']
         self.envelopes = []
         self.user_balance = {}
@@ -137,8 +138,6 @@ class CDInfoBot:
         #--------------------------------------------------------
         dpr.add_handler(tx.CommandHandler('balance',self.balance))
         dpr.add_handler(tx.CommandHandler('dice',   self.dice,  run_async=True))
-        dpr.add_handler(tx.CallbackQueryHandler(self.gamble_action, pattern='gamble'))
-        dpr.add_handler(tx.CallbackQueryHandler(self.envelope, pattern='envelope'))
         dpr.add_handler(tx.CommandHandler('gamble', self.gamble))
         #--------------------------------------------------------
         dpr.add_handler(tx.CommandHandler('sleep',  self.sleep))
@@ -148,6 +147,7 @@ class CDInfoBot:
         dpr.add_handler(tx.CommandHandler('save',   self.save))
         dpr.add_handler(tx.CommandHandler('reward', self.reward))
         #--------------------------------------------------------
+        dpr.add_handler(tx.CallbackQueryHandler(self.query_handler))
         dpr.add_handler(tx.MessageHandler(tx.Filters.all, self.show))
         print(f"[{self.name} handler ready]")
 
@@ -163,7 +163,7 @@ class CDInfoBot:
         self.updater.idle()
         print(f"[{self.name} terminated]")
 
-# private functions        
+# private functions
 ####################################################################################
 
     def _valid_update(self, update):
@@ -195,6 +195,9 @@ class CDInfoBot:
                 return True
             else:
                 return False
+
+    def _balance_changes(self, change_sheet):
+        [self._balance_change(user_id, change) for user_id,change in change_sheet.items()]
 
 # question
 ####################################################################################
@@ -316,32 +319,6 @@ class CDInfoBot:
         else:
             self._reply(update, f"{update.message.from_user.full_name} 擁有0顆 島幣")
 
-# Message Handler: show
-    def show(self, update: Update, context: CallbackContext) -> None:
-        if not self._valid_update(update):
-            return
-        if update.message.chat.type != 'private' and np.random.randint(0,self.p_possi) == 0:
-            money_str = str(round(np.random.normal(self.p_mean,self.p_std)))
-            keyboard = [[tg.InlineKeyboardButton(callback_data=f'envelope:{money_str}', text='領取🧧')]]
-            reply_markup = tg.InlineKeyboardMarkup(keyboard)
-            update.message.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")
-
-# Callback Query Handler: envelope
-    def envelope(self, update: Update, context: CallbackContext) -> None:
-        query = update.callback_query
-        if query.message.message_id not in self.envelopes:
-            query.answer(text="搶到啦😁")
-            money = int(query.data.split(':')[1])
-            if money <= 0:
-                query.edit_message_text(f"{query.from_user.full_name} 收到一顆 {np.random.choice(self.sorry_reply)}")
-            else:
-                money_str = "{:,}".format(money)
-                query.edit_message_text(f"{query.from_user.full_name} 收到{money_str}顆 島幣")
-                self._balance_change(query.from_user.id, money)
-            self.envelopes.append(query.message.message_id)
-        else:
-            query.answer(text="沒搶到🙁")
-
 # Command Handler: /dice
     def dice(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
@@ -373,78 +350,116 @@ class CDInfoBot:
 
 # Command Handler: /gamble
     def gamble(self, update: Update, context: CallbackContext) -> None:
-        bet_game = BetGame(update.message.from_user.id, context.args[0], context.args[1:])
+        if not self._valid_update(update):
+            return        
+        if len(context.args) < 3:
+            self._reply(update, self.error_reply[len(context.args)])
+            return
+        bet_game = BetGame(update.message.from_user, context.args[0], context.args[1:])
         game_msg = update.message.reply_text(text=bet_game.get_text(), reply_markup=bet_game.get_button())
         game_id = f'{game_msg.chat.id}:{game_msg.message_id}'
         self.bet_games[game_id] = bet_game
+
+# Callback Query Handler: query_handler
+    def query_handler(self, update: Update, context: CallbackContext) -> None:
+        data = update.callback_query.data
+        if data[:8] == 'envelope':
+            self.open_envelope(update, context)
+        elif data[:6] == 'gamble':
+            self.gamble_action(update, context)
+
+# Callback Query Handler: open_envelope
+    def open_envelope(self, update: Update, context: CallbackContext) -> None:
+        query = update.callback_query
+        if query.message.message_id not in self.envelopes:
+            query.answer(text="搶到啦😁")
+            money = int(query.data.split(':')[1])
+            if money <= 0:
+                query.edit_message_text(f"{query.from_user.full_name} 收到一顆 {np.random.choice(self.sorry_reply)}")
+            else:
+                money_str = "{:,}".format(money)
+                query.edit_message_text(f"{query.from_user.full_name} 收到{money_str}顆 島幣")
+                self._balance_change(query.from_user.id, money)
+            self.envelopes.append(query.message.message_id)
+        else:
+            query.answer(text="沒搶到🙁")
 
 # Callback Query Handler: gamble_action
     def gamble_action(self, update: Update, context: CallbackContext) -> None:
         query = update.callback_query
         game_id = f'{query.message.chat.id}:{query.message.message_id}'
         if game_id not in self.bet_games:
-            query.answer(text="賭局無效")
+            query.answer(text="無效賭局")
             return
         game = self.bet_games[game_id]
         struct = query.data.split(':')
-        gamer = query.from_user.id
+        gamer = query.from_user
         host = game.host
         act = len(struct)
-        changes = None
         # betting
         if act == 3:
             stk = int(struct[2])
-            if stk > 0:
+            if not self._balance_change(gamer.id, -stk):
+                query.answer(text="錢不夠耶😶")
+            else:
                 game.stake_on(gamer,struct[1],stk)
                 query.answer(text="下注成功")
                 query.edit_message_text(text=game.get_text(), reply_markup=game.get_button())
-            else:
-                query.answer(text="無效按鈕")
         # close
         elif act == 1:
-            if gamer == host:
+            if gamer != host:
+                query.answer(text="你不是莊家😶")
+            else:
                 game.close()
                 query.answer(text="關閉賭局")
                 query.edit_message_text(text=game.get_text(), reply_markup=game.get_button())
-            else:
-                query.answer(text="你不是莊家")
         # settle
         elif act == 2:
-            if gamer == host:
-                changes = game.settle(struct[1])
+            if gamer != host:
+                query.answer(text="你不是莊家😶")
+            else:
+                changes, changes_display = game.settle(struct[1])
+                self._balance_changes(changes)
                 query.answer(text="結算成功")
                 query.edit_message_text(text=game.get_text(), reply_markup=game.get_button())
-            else:
-                query.answer(text="你不是莊家")
+                query.message.reply_text(changes_display)
+        else:
+            query.answer(text="系統錯誤")
 
-        if changes:
-            query.message.reply_text(''.join([f'\n{gamer} get {money}' for gamer,money in changes.items()]))
-            del game
-        query.answer()
+# Message Handler: show
+    def show(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        if update.message.chat.type == 'private' and np.random.randint(0,self.p_possi) == 0:
+            money_str = str(round(np.random.normal(self.p_mean,self.p_std)))
+            keyboard = [[tg.InlineKeyboardButton(callback_data=f'envelope:{money_str}', text='領取🧧')]]
+            reply_markup = tg.InlineKeyboardMarkup(keyboard)
+            update.message.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")
 
-
-# control
+# control (owner only)
 ####################################################################################
 
-# Command Handler: /sleep (owner only)
+# Command Handler: /sleep
     def sleep(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
             self.save(update, context)
             self._reply(update, '😴', )
             os.kill(os.getpid(), signal.SIGINT)
 
-# Command Handler: /status (owner only)
+# Command Handler: /status
     def status(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
-            self._reply_owner(update, f"envelopes: {len(self.envelopes)}")
+            show = f"\nenvelopes: {len(self.envelopes)}"+\
+                   f"\nbet_games: {len(self.bet_games)}"
+            self._reply_owner(update, show)
 
-# Command Handler: /clear (owner only)
+# Command Handler: /clear
     def clear(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
             self.envelopes = []
             self._reply_owner(update, f"envelopes: {len(self.envelopes)}")
 
-# Command Handler: /param (owner only)
+# Command Handler: /param
     def param(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
             if len(context.args) == 0:
@@ -457,7 +472,7 @@ class CDInfoBot:
             else:
                 self._reply_owner(update, 'command error')
 
-# Command Handler: /save (owner only)
+# Command Handler: /save
     def save(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
             balances_str = ''.join([f'\n{user} : {balance}' for user,balance in self.user_balance.items()])
@@ -466,7 +481,7 @@ class CDInfoBot:
             with open(self.balance_file, 'w', encoding='utf8') as outfile:
                 json.dump(self.user_balance, outfile, indent=4, ensure_ascii=False)
 
-# Command Handler: /reward (owner only)
+# Command Handler: /reward
     def reward(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
             if len(context.args) == 2 and context.args[0] in self.user_balance:
@@ -480,13 +495,12 @@ class CDInfoBot:
             else:
                 self._reply_owner(update, 'command error')
 
-#-------------------------------------------------------------------
-#   main
-#-------------------------------------------------------------------
+####################################################################################
+
 def main():
 
-    bot_list = (('token_CD_info_bot', 'Island Bot', 'island_balance.json'),
-               ('token_Justa_test_bot', 'Test Bot', 'test_balance.json'))
+    bot_list = (('token_CD_info_bot', 'Island Bot', 'balance_island.json'),
+                ('token_CD_shad_bot', 'Shadow Bot', 'balance_shadow.json'))
 
     which = 1
 

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import telebot
-from misc import parse_token, parse_id
+from parse import parse_token, parse_id
 
 def main():
 	
