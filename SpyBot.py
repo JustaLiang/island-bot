@@ -289,6 +289,57 @@ class SpyBot:
                         if game.expected_votes == 0:
                             self.conclude_poll(c_id)
 
+    def button_handler_kill(self, update):
+        query = update.callback_query
+        c_id, u_id, u_name, m_id = util.message_info(update.message)
+        if c_id in self.games:
+            game = self.games[c_id]
+            if game.state == State.KILL:
+                if u_id != game.h_id:
+                    self.bot.send_message(
+                        c_id, game.not_host())
+                elif int(query.data) in game.players:
+                    victim_u_id = int(query.data)
+                    query.answer()
+
+                    win, info_str = game.kill_player(sorted_votes[0][0])
+                    self.bot.send_message(
+                        c_id, text=info_str)
+                    self.bot.delete_message(c_id, game.m_id['kill_button'])
+
+                    if win[0]:
+                        self.bot.send_message(
+                            c_id, text=win[1])
+                        game.reset()
+                    else:
+                        self.bot.send_message(
+                            c_id, text=win[1])
+                        self.next_turn(c_id)
+
+    def button_handler_host(self, update):
+        query = update.callback_query
+        c_id, _, _, _ = util.message_info(query.message)
+        u_id = query.from_user.id
+        u_name = query.from_user.full_name
+        if c_id in self.games:
+            game = self.games[c_id]
+            if u_id != game.h_id:
+                self.bot.send_message(
+                    c_id, game.not_host())
+            elif int(query.data) in game.players:
+                next_host_u_id = int(query.data)
+                query.answer()
+
+                if next_host_u_id == game.h_id:
+                    self.bot.send_message(
+                        c_id,f'{game.h_name}你在靠夭喔 根本沒換啊')
+                else:
+                    game.h_id = next_host_u_id
+                    game.h_name = next_host_u_name
+                    next_host_u_name = game.players[next_host_u_id]
+                    self.bot.send_message(
+                        c_id,f'大家注意 主持人換成{game.h_name}囉')
+
     def end_poll(self, update: Update, context: CallbackContext) -> None:
         c_id, u_id, u_name, m_id = util.message_info(update.message)
         if c_id not in self.games:
@@ -346,31 +397,44 @@ class SpyBot:
         self.bot.send_message(
             c_id, info_str)
 
-    def _kill_button_handler(self, update):
-        query = update.callback_query
-        if query.message.message_id == self.current_kill_id:
-            if self.current_state == State.KILL:
-                uid = query.from_user['id']
-                name = user_json2name(query.from_user)
-                if uid != self.host_uid:
-                    self.bot.send_message(
-                        self.gid, f'{name} 不要亂點 只有主持人{self.host_name}能按')
-                elif int(query.data) in self.players:
-                    self._kill(int(query.data))
-
-    def kill_player(self, victim_uid):
-        victim_name = self.players[victim_uid].name
-
-        self.players[victim_uid].alive = False
-        victim_identity = self.players[victim_uid].identity
-        self.bot.send_message(
-            self.gid, f'{victim_name} 死了 他的身份是{identity_str(victim_identity)}')
-        self.identity_count[victim_identity] -= 1
-        self._show_identity_count()
-        if self._check_win():
-            self._reset()
+    def kill(self, update: Update, context: CallbackContext) -> None:
+        c_id, u_id, u_name, m_id = util.message_info(update.message)
+        if c_id not in self.games:
+            pass
             return
-        self._init_turn()
+        game = self.games[c_id]
+        if u_id != game.h_id:
+            self.bot.send_message(
+                c_id, game.not_host(), reply_to_message_id=m_id)
+        if game.state == State.CLUE or game.state == State.DISCUSS:
+            keyboard = [[]]
+            for u_id, player in game.players.items():
+                if player.alive and player.play:
+                    keyboard[0].append(tg.InlineKeyboardButton(callback_data=u_id, text=player.name))
+            reply_markup = tg.InlineKeyboardMarkup(keyboard)
+            ret_msg = self.bot.send_message(
+                c_id, reply_markup=reply_markup, text=f"主持人{game.h_name}要強制殺人囉～")
+            game.m_id['kill_button'] = ret_msg.message_id
+            game.set_state(State.KILL)
+
+    def set_host(self, update: Update, context: CallbackContext) -> None:
+        c_id, u_id, u_name, m_id = util.message_info(update.message)
+        if c_id not in self.games:
+            pass
+            return
+        game = self.games[c_id]
+        if u_id != game.h_id:
+            self.bot.send_message(
+                c_id, game.not_host(), reply_to_message_id=m_id)
+        else:
+            keyboard = [[]]
+            #keyboard[0].append(tg.InlineKeyboardButton(callback_data=game.h_id, text=player.name))
+            for u_id, player in game.players.items():
+                keyboard[0].append(tg.InlineKeyboardButton(callback_data=u_id, text=player.name))
+            reply_markup = tg.InlineKeyboardMarkup(keyboard)
+            ret_msg = self.bot.send_message(
+                c_id, reply_markup=reply_markup, text=f"主持人{game.h_name}不想幹了 要交棒～")
+            game.m_id['host_button'] = ret_msg.message_id
 
     def button_handler(self, update: Update, context: CallbackContext) -> None:
         query = update.callback_query
@@ -382,10 +446,10 @@ class SpyBot:
                 self.button_handler_registor(update)
             elif query.message.message_id == game.m_id['poll_button']:
                 self.button_handler_poll(update)
-            #elif query.message.message_id == self.current_register_id:
-            #    self._register_button_handler(update)
-            #elif query.message.message_id == self.current_kill_id:
-            #    self._kill_button_handler(update)
+            elif query.message.message_id == game.m_id['kill_button']:
+                self.button_handler_kill(update)
+            elif query.message.message_id == game.m_id['host_button']:
+                self.button_handler_host(update)
 
     def set_words(self, update: Update, context: CallbackContext) -> None:
         private_id, u_id, u_name, m_id = util.message_info(update.message)
@@ -404,15 +468,6 @@ class SpyBot:
                             ret_msg = game.set_words(options[2], options[3], random=True)
                             self.bot.send_message(u_id, ret_msg)
 
-
-    def _reset(self):
-        self.current_state = State.IDLE
-        self.history = []
-        self.players = {}
-        self.name2uid = {}
-        self.identity_count = {}
-        self.uid_wtp = {}
-
     def remain(self, update: Update, context: CallbackContext) -> None:
         c_id, u_id, u_name, m_id = util.message_info(query.message)
         if c_id not in self.games:
@@ -420,6 +475,18 @@ class SpyBot:
             return
         game = self.games[c_id]
         self.bot.send_message(c_id, f'目前還剩有 {game.log_identity_count()}')
+
+    def init(self, update: Update, context: CallbackContext) -> None:
+        c_id, u_id, u_name, m_id = util.message_info(query.message)
+        if c_id not in self.games:
+            pass
+            return
+        game = self.games[c_id]
+        if u_id != game.h_id:
+            self.bot.send_message(
+                c_id, game.not_host(), reply_to_message_id=m_id)
+        else:
+            game.init()
 
     def reset(self, update: Update, context: CallbackContext) -> None:
         c_id, u_id, u_name, m_id = util.message_info(query.message)
@@ -431,19 +498,6 @@ class SpyBot:
             self.bot.send_message(
                 c_id, game.not_host(), reply_to_message_id=m_id)
         else:
-            game.reset()
-
-    def clear(self, update: Update, context: CallbackContext) -> None:
-        c_id, u_id, u_name, m_id = util.message_info(query.message)
-        if c_id not in self.games:
-            pass
-            return
-        game = self.games[c_id]
-        if u_id != game.h_id:
-            self.bot.send_message(
-                c_id, game.not_host(), reply_to_message_id=m_id)
-        else:
-            game.players = {}
             game.reset()
 
 def main():
@@ -465,11 +519,12 @@ def main():
     dispatcher.add_handler(CommandHandler("clue", spy_bot.clue))
     dispatcher.add_handler(CommandHandler("skip", spy_bot.skip))
     dispatcher.add_handler(CommandHandler("skip_all", spy_bot.skip_all))
-    #dispatcher.add_handler(CommandHandler("set_host", spy_bot.set_host))
-    #dispatcher.add_handler(CommandHandler("kill", spy_bot.kill))
+    dispatcher.add_handler(CommandHandler("set_host", spy_bot.set_host))
+    dispatcher.add_handler(CommandHandler("kill", spy_bot.kill))
     dispatcher.add_handler(CommandHandler("poll", spy_bot.poll))
     dispatcher.add_handler(CommandHandler("remain", spy_bot.remain))
     dispatcher.add_handler(CommandHandler("end_poll", spy_bot.end_poll))
+    dispatcher.add_handler(CommandHandler("init", spy_bot.init))
     dispatcher.add_handler(CommandHandler("reset", spy_bot.reset))
     dispatcher.add_handler(CommandHandler("tutorial", spy_bot.tutorial))
 
@@ -482,7 +537,7 @@ def main():
     #dispatcher.add_handler(MessageHandler(Filters.document.file_extension('txt'), meow_bot.meow))
 
     # Start the Bot
-    updater.start_polling()
+    updater.start_polling(clean=True)
 
     # Run the bot until you press Ctrl-C or the process receives SIGINT,
     # SIGTERM or SIGABRT. This should be used most of the time, since

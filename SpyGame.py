@@ -28,12 +28,14 @@ class State(Enum):
     POLL = 4
     KILL = 5
     DISCUSS = 6
+    HOST = -1
 
     def __str__(self):
         if self.value == 0:
             return '閒置'
         elif self.value == 1:
             pass
+        return f'{self.value}未定義'
 
 class Player:
     def __init__(self, u_id, u_name):
@@ -75,6 +77,9 @@ class SpyGame:
             6: {Identity.NEUTRAL: 1, Identity.CIVILIAN: 4, Identity.SPY: 1},
             7: {Identity.NEUTRAL: 1, Identity.CIVILIAN: 4, Identity.SPY: 2},
         }
+        self.init()
+
+    def init(self):
         self.identity_count = {
             Identity.NEUTRAL: 0,
             Identity.CIVILIAN: 0,
@@ -86,8 +91,6 @@ class SpyGame:
             Identity.CIVILIAN: 'Orange',
             Identity.SPY: 'Apple'
         }
-
-
         self.players = {}
         self.reset()
 
@@ -96,6 +99,10 @@ class SpyGame:
             player.reset()
 
         self.m_id = {}
+        self.m_id['register_button'] = -1
+        self.m_id['poll_button'] = -1
+        self.m_id['kill_button'] = -1
+        self.m_id['host_button'] = -1
         self.set_state(State.IDLE)
         self.clue_idx = 0
 
