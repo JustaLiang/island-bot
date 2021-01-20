@@ -329,6 +329,7 @@ class SpyBot:
             elif int(query.data) in game.players:
                 next_host_u_id = int(query.data)
                 query.answer()
+                self.bot.delete_message(c_id, game.m_id['host_button'])
 
                 if next_host_u_id == game.h_id:
                     self.bot.send_message(
