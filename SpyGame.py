@@ -22,19 +22,26 @@ class Identity(Enum):
 
 class State(Enum):
     IDLE = 0
-    INVITE = 1
-    REGISTER = 2
-    CLUE = 3
+    REGISTER = 1
+    CLUE = 2
+    DISCUSS = 3
     POLL = 4
     KILL = 5
-    DISCUSS = 6
     HOST = -1
 
     def __str__(self):
         if self.value == 0:
             return '閒置'
         elif self.value == 1:
-            pass
+            return '註冊'
+        elif self.value == 2:
+            return '提示'
+        elif self.value == 3:
+            return '討論'
+        elif self.value == 4:
+            return '投票'
+        elif self.value == 5:
+            return '殺人'
         return f'{self.value}未定義'
 
 class Player:
@@ -105,6 +112,14 @@ class SpyGame:
         self.m_id['host_button'] = -1
         self.set_state(State.IDLE)
         self.clue_idx = 0
+
+    def log_voted(self):
+        ret = []
+        for u_id, player in self.players.items():
+            if player.alive and player.play and player.voted:
+                ret.append(f'{player.name} 投票了')
+        ret = '\n'.join(ret)
+        return ret
 
     def log_identity_count(self):
         ret = []
