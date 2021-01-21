@@ -189,7 +189,8 @@ class CDInfoBot:
         dpr.add_handler(tx.CommandHandler('tells',  self.tells))
         dpr.add_handler(tx.CommandHandler('shuffle',self.shuffle))
         dpr.add_handler(tx.CommandHandler('pair',   self.pair))
-        dpr.add_handler(tx.CommandHandler('count',  self.count, run_async=True))
+        dpr.add_handler(tx.CommandHandler('send',   self.send))
+        dpr.add_handler(tx.CommandHandler('allin',  self.allin))
         #--------------------------------------------------------
         dpr.add_handler(tx.CommandHandler('balance',self.balance))
         dpr.add_handler(tx.CommandHandler('dice',   self.dice,  run_async=True))
@@ -351,25 +352,40 @@ class CDInfoBot:
         result = ''.join([ '\n'+src+' - '+tar for src,tar in zip(source, target)])
         self._reply(update, result)
 
-# Command Handler: /count
-    def count(self, update: Update, context: CallbackContext) -> None:
+# Command Handler: /send
+    def send(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
-        if len(context.args) < 1 or not str.isdigit(context.args[0]):
+        elif update.message.reply_to_message is None:
             self._reply(update, self.error_reply[0])
+        elif not context.args or not str.isdigit(context.args[0]):
+            self._reply(update, self.error_reply[0])
+        else:
+            money = int(context.args[0])
+            if money <= 0:
+                self._reply(update, self.error_reply[1])
+            sender = update.message.from_user
+            receiver = update.message.reply_to_message.from_user
+
+            if not self._balance_change(sender.id, -money):
+                update.message.reply_text(f"{sender.full_name} 錢不夠喔😶")
+                return
+            self._balance_change(receiver.id, money)
+            update.message.reply_to_message.reply_text(f"{sender.full_name} 送給 {receiver.full_name} {money}顆 島幣")
+
+# Command Handler: /allin
+    def allin(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
             return
-        cd_time = int(context.args[0])
-        if cd_time <= 0 or cd_time > 20:
-            self._reply(update, self.error_reply[1])
-            return
-        count_message = update.message.reply_text(f"⏱ {context.args[0]}")
-        while cd_time:
-            time.sleep(1)
-            cd_time -= 1
-            update.message.bot.edit_message_text(chat_id=update.message.chat.id,
-                                                 message_id=count_message.message_id,
-                                                 text=f"⏱ {cd_time}")
-        self._reply(update, "GO GO 🤩")
+        elif update.message.reply_to_message is None:
+            self._reply(update, self.error_reply[0])
+        else:
+            sender = update.message.from_user
+            receiver = update.message.reply_to_message.from_user
+            money = self.user_balance[str(sender.id)]
+            self._balance_change(sender.id, -money)
+            self._balance_change(receiver.id, money)
+            update.message.reply_to_message.reply_text(f"{sender.full_name} 歐印 {receiver.full_name} {money}顆 島幣")
 
 # finance
 ####################################################################################
