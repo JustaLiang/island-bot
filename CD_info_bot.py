@@ -81,6 +81,9 @@ class BetGame:
         self.id = game_id
         self.description = f"{self.id}\n{self.description}"
 
+    def get_header(self):
+        return f"{self.description}\n---{self.state}---"
+
     def get_text(self):
         return f"{self.description}\n---{self.state}---"+''.join([f"\n{opt}: {self.options[opt]['bet']} ({self.options[opt]['odd']})" for opt in self.options])
 
@@ -130,16 +133,35 @@ class BetGame:
         self.markup = None
         if self.changes:
             display = f"{self.id}\n莊家指定結果：{outcome}"+''.join([f"\n***{gamer_id[-4:]} {'贏了' if amount >= 0 else '輸了'}{abs(amount)}顆 島幣" for gamer_id,amount in self.changes.items()])
+            self.state = '已結算'
         else:
             display = f"{self.id}\n莊家指定結果：{outcome}\n但好像沒有人下注欸😶"
+            self.state = '流局'
 
-        self.state = '已結算'
         return self.outputs, display
 
     def reverse(self):
         if self.state != '已結算':
             return None
         return {gamer:-change for gamer,change in self.changes.items()}
+
+    def check(self, gamer):
+        gamer_id = str(gamer.id)
+        record = ""
+        if self.state == '下注中' or self.state == '已收盤':
+            for opt in self.options:
+                if gamer_id in self.options[opt]['detail']:
+                    record += f"\n{opt}: {self.options[opt]['detail'][gamer_id]}"
+        elif self.state == '流局':
+            record = " "
+        else:
+            if gamer_id in self.changes:
+                record += f"\n{'贏了' if self.changes[gamer_id] >= 0 else '輸了'} {abs(self.changes[gamer_id])}"
+
+        if record:
+            return self.get_header()+record+'\n'
+        else:
+            return ""
 
 # Bot class
 class CDInfoBot:
@@ -396,6 +418,13 @@ class CDInfoBot:
     def gamble(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
+        if not context.args:
+            records = '\n'.join([game.check(update.message.from_user) for game in self.bet_games.values()])
+            if records:
+                self._reply(update, records)
+            else:
+                self._reply(update, "沒有賭博記錄呦🤗")
+            return
         if len(context.args) < 3:
             self._reply(update, self.error_reply[len(context.args)])
             return
@@ -499,17 +528,18 @@ class CDInfoBot:
     def status(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
             show = f"\nenvelopes: {len(self.envelopes)}"+\
-                   f"\nbet_games: {len(self.bet_games)}"
+                   f"\nbet_games: {len(self.bet_games)}\n"+\
+                   '\n'.join([f"  {gid} {game.state}" for gid,game in self.bet_games.items()])
             self._reply_owner(update, show)
 
 # Command Handler: /clear
     def clear(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
             self.envelopes = []
-            self.bet_games = {}
-            show = f"\nenvelopes: {len(self.envelopes)}"+\
-                   f"\nbet_games: {len(self.bet_games)}"
-            self._reply_owner(update, show)
+            for gid in list(self.bet_games):
+                if self.bet_games[gid].state == '流局':
+                    del self.bet_games[gid]
+            self.status(update, context)
 
 # Command Handler: /param
     def param(self, update: Update, context: CallbackContext) -> None:
