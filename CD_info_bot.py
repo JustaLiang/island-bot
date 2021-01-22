@@ -175,6 +175,7 @@ class CDInfoBot:
         self.envelopes = []
         self.user_balance = {}
         self.bet_games = {}
+        self.donate_list = {}
         self.p_possi = 25
         self.p_mean = 4
         self.p_std = 2
@@ -189,10 +190,11 @@ class CDInfoBot:
         dpr.add_handler(tx.CommandHandler('tells',  self.tells))
         dpr.add_handler(tx.CommandHandler('shuffle',self.shuffle))
         dpr.add_handler(tx.CommandHandler('pair',   self.pair))
-        dpr.add_handler(tx.CommandHandler('send',   self.send))
-        dpr.add_handler(tx.CommandHandler('allin',  self.allin))
         #--------------------------------------------------------
         dpr.add_handler(tx.CommandHandler('balance',self.balance))
+        dpr.add_handler(tx.CommandHandler('send',   self.send))
+        dpr.add_handler(tx.CommandHandler('allin',  self.allin))
+        dpr.add_handler(tx.CommandHandler('donate', self.donate))
         dpr.add_handler(tx.CommandHandler('dice',   self.dice,  run_async=True))
         dpr.add_handler(tx.CommandHandler('gamble', self.gamble))
         #--------------------------------------------------------
@@ -202,7 +204,7 @@ class CDInfoBot:
         dpr.add_handler(tx.CommandHandler('param',  self.param))
         dpr.add_handler(tx.CommandHandler('save',   self.save))
         dpr.add_handler(tx.CommandHandler('reward', self.reward))
-        dpr.add_handler(tx.CommandHandler('reverse', self.reverse))
+        dpr.add_handler(tx.CommandHandler('reverse',self.reverse))
         #--------------------------------------------------------
         dpr.add_handler(tx.CallbackQueryHandler(self.query_handler))
         dpr.add_handler(tx.MessageHandler(tx.Filters.all, self.show))
@@ -352,41 +354,6 @@ class CDInfoBot:
         result = ''.join([ '\n'+src+' - '+tar for src,tar in zip(source, target)])
         self._reply(update, result)
 
-# Command Handler: /send
-    def send(self, update: Update, context: CallbackContext) -> None:
-        if not self._valid_update(update):
-            return
-        elif update.message.reply_to_message is None:
-            self._reply(update, self.error_reply[0])
-        elif not context.args or not str.isdigit(context.args[0]):
-            self._reply(update, self.error_reply[0])
-        else:
-            money = int(context.args[0])
-            if money <= 0:
-                self._reply(update, self.error_reply[1])
-            sender = update.message.from_user
-            receiver = update.message.reply_to_message.from_user
-
-            if not self._balance_change(sender.id, -money):
-                update.message.reply_text(f"{sender.full_name} 錢不夠喔😶")
-                return
-            self._balance_change(receiver.id, money)
-            update.message.reply_to_message.reply_text(f"{sender.full_name} 送給 {receiver.full_name} {money}顆 島幣")
-
-# Command Handler: /allin
-    def allin(self, update: Update, context: CallbackContext) -> None:
-        if not self._valid_update(update):
-            return
-        elif update.message.reply_to_message is None:
-            self._reply(update, self.error_reply[0])
-        else:
-            sender = update.message.from_user
-            receiver = update.message.reply_to_message.from_user
-            money = self.user_balance[str(sender.id)]
-            self._balance_change(sender.id, -money)
-            self._balance_change(receiver.id, money)
-            update.message.reply_to_message.reply_text(f"{sender.full_name} 歐印 {receiver.full_name} {money}顆 島幣")
-
 # finance
 ####################################################################################
 
@@ -400,6 +367,60 @@ class CDInfoBot:
             self._reply(update, f"{update.message.from_user.full_name} 擁有{balance}顆 島幣")
         else:
             self._reply(update, f"{update.message.from_user.full_name} 擁有0顆 島幣")
+
+# Command Handler: /send
+    def send(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        elif update.message.reply_to_message is None:
+            self._reply(update, self.error_reply[0])
+        elif not context.args or not str.isdigit(context.args[0]):
+            self._reply(update, self.error_reply[0])
+        else:
+            amount = int(context.args[0])
+            if amount <= 0:
+                self._reply(update, self.error_reply[1])
+
+            sender = update.message.from_user
+            receiver = update.message.reply_to_message.from_user
+            if not self._balance_change(sender.id, -amount):
+                update.message.reply_text(f"{sender.full_name} 錢不夠喔😶")
+                return
+            self._balance_change(receiver.id, amount)
+            update.message.bot.send_message(chat_id=update.message.chat.id,
+                                            text=f"{sender.full_name} 送給 {receiver.full_name} {amount}顆 島幣")
+
+# Command Handler: /allin
+    def allin(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        elif update.message.reply_to_message is None:
+            self._reply(update, self.error_reply[0])
+        else:
+            sender = update.message.from_user
+            receiver = update.message.reply_to_message.from_user
+            amount = self.user_balance[str(sender.id)]
+            self._balance_change(sender.id, -amount)
+            self._balance_change(receiver.id, amount)
+            update.message.bot.send_message(chat_id=update.message.chat.id,
+                                            text=f"{sender.full_name} 歐印 {receiver.full_name} {amount}顆 島幣")
+
+# Command Handler: /donate
+    def donate(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        elif update.message.reply_to_message is None:
+            self._reply(update, self.error_reply[0])
+        else:
+            target = update.message.reply_to_message
+            target_id = f"{target.chat.id}#{target.message_id}"
+            if target_id in self.donate_list:
+                return
+            self.donate_list[target_id] = {'chat_id':0,'msg_id':0,'detail':{}}
+            amount_button = tg.InlineKeyboardMarkup([[tg.InlineKeyboardButton(text=num, callback_data=f"donate:{num}") for num in ['1','3','5','10']]])
+            reply_msg = target.reply_text(text="打賞！", reply_markup=amount_button)
+            self.donate_list[target_id]['chat_id'] = reply_msg.chat.id
+            self.donate_list[target_id]['msg_id'] = reply_msg.message_id
 
 # Command Handler: /dice
     def dice(self, update: Update, context: CallbackContext) -> None:
@@ -461,6 +482,8 @@ class CDInfoBot:
             self.open_envelope(update, context)
         elif data[:6] == 'gamble':
             self.gamble_action(update, context)
+        elif data[:6] == 'donate':
+            self.donate_handle(update, context)
 
 # Callback Query Handler: open_envelope
     def open_envelope(self, update: Update, context: CallbackContext) -> None:
@@ -520,6 +543,33 @@ class CDInfoBot:
         else:
             query.answer(text="系統錯誤", show_alert=True)
 
+# Callback Query Handler: donate_handle
+    def donate_handle(self, update: Update, context: CallbackContext) -> None:
+        query = update.callback_query
+        target = query.message.reply_to_message
+        target_id = f"{target.chat.id}#{target.message_id}"
+        if target_id not in self.donate_list:
+            query.answer(text="不能抖了😶", show_alert=True)
+            return
+        donor = query.from_user.full_name
+        amount = int(query.data.split(':')[1])
+        if not self._balance_change(query.from_user.id, -amount):
+            query.answer(text="錢不夠耶😶", show_alert=True)
+            return
+        self._balance_change(target.from_user.id, amount)
+        query.answer(text="抖內成功", show_alert=True)
+        donate = self.donate_list[target_id]
+        if donor in donate['detail']:
+            donate['detail'][donor] += amount
+        else:
+            donate['detail'][donor] = amount
+        total = sum(self.donate_list[target_id]['detail'].values())
+        amount_button = tg.InlineKeyboardMarkup([[tg.InlineKeyboardButton(text=num, callback_data=f"donate:{num}") for num in ['1','3','5','10']]])
+        query.message.bot.edit_message_text(chat_id=donate['chat_id'],
+                                            message_id=donate['msg_id'],
+                                            text=''.join([f"\n{donor} 抖內{amount}顆島幣" for donor,amount in donate['detail'].items()])+f"\n-----\n此訊息獲得{total}顆 島幣",
+                                            reply_markup=amount_button)
+
 # Message Handler: show
     def show(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
@@ -545,7 +595,8 @@ class CDInfoBot:
         if update.message.from_user.id == self.owner:
             show = f"\nenvelopes: {len(self.envelopes)}"+\
                    f"\nbet_games: {len(self.bet_games)}\n"+\
-                   '\n'.join([f"  {gid} {game.state}" for gid,game in self.bet_games.items()])
+                   '\n'.join([f"  {gid} {game.state}" for gid,game in self.bet_games.items()])+\
+                   f"\ndonate_list: {len(self.donate_list)}"
             self._reply_owner(update, show)
 
 # Command Handler: /clear
@@ -555,6 +606,12 @@ class CDInfoBot:
             for gid in list(self.bet_games):
                 if self.bet_games[gid].state == '流局':
                     del self.bet_games[gid]
+
+            for donate in self.donate_list.values():
+                update.message.bot.edit_message_reply_markup(chat_id=donate['chat_id'],
+                                                             message_id=donate['msg_id'],
+                                                             reply_markup=None)
+            self.donate_list = {}
             self.status(update, context)
 
 # Command Handler: /param
@@ -616,7 +673,7 @@ def main():
     bot_list = (('token_CD_info_bot', 'Island Bot', 'balance_island.json'),
                 ('token_CD_shad_bot', 'Shadow Bot', 'balance_shadow.json'))
 
-    which = 1
+    which = 0
 
     bot_token = parse_token(bot_list[which][0])
     if not bot_token:
