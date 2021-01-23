@@ -236,8 +236,13 @@ class SpyBot:
             player.voted = False
             player.votes = 0
         game.poll_reply_markup = tg.InlineKeyboardMarkup(game.poll_keyboard)
+
+        voted_str = game.log_voted()
         ret_msg = self.bot.send_message(
-            c_id, reply_markup=game.poll_reply_markup, text=f"你們要殺誰？ 目前還剩有{game.log_identity_count()}")
+            c_id,
+            text=f'你們要殺誰？ 目前還剩有{game.log_identity_count()}\n{voted_str}',
+            reply_markup=game.poll_reply_markup
+        )
 
         game.m_id['poll_button'] = ret_msg.message_id
         game.set_state(State.POLL)
@@ -370,9 +375,10 @@ class SpyBot:
         for u_id, player in game.players.items():
             if player.alive and player.play and (player.voted != False):
                 voted_str.append(f'{player.name} 投給了 {game.players[player.voted].name}')
+        voted_str = '\n'.join(voted_str)
 
         self.bot.send_message(
-                c_id, text=f'{player.name} 投給了 {game.players[player.voted].name}')
+                c_id, text=voted_str)
         self.bot.delete_message(c_id, game.m_id['poll_button'])
         game.m_id['poll_button'] = -1
 

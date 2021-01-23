@@ -114,11 +114,15 @@ class SpyGame:
         self.clue_idx = 0
 
     def log_voted(self):
-        ret = []
+        voted = []
+        not_voted = []
         for u_id, player in self.players.items():
-            if player.alive and player.play and player.voted:
-                ret.append(f'{player.name} 投票了')
-        ret = '\n'.join(ret)
+            if player.alive and player.play:
+                if player.voted is False:
+                    not_voted.append(player.name)
+                else:
+                    voted.append(player.name)
+        ret = '\n已投票：' +', '.join(voted) + '\n未投票：'+', '.join(not_voted) + '\n'
         return ret
 
     def log_identity_count(self):
