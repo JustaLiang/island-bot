@@ -240,6 +240,12 @@ class CDInfoBot:
         update.message.bot.send_message(chat_id=self.owner, text=text)
         print(self.name, ':', text)
 
+    def _save(self):
+        balances_str = '\n{'+''.join([f'\n    "{user}": {balance}' for user,balance in self.user_balance.items()])+'\n}'
+        with open(self.balance_file, 'w', encoding='utf8') as outfile:
+            json.dump(self.user_balance, outfile, indent=4, ensure_ascii=False)
+        return balances_str
+
     def _balance_change(self, user_id, change):
         id_str = str(user_id)
         if change >= 0:
@@ -247,10 +253,12 @@ class CDInfoBot:
                 self.user_balance[id_str] += change
             else:
                 self.user_balance[id_str] = change
+            self._save()
             return True
         else:
             if id_str in self.user_balance and self.user_balance[id_str] >= -change:
                 self.user_balance[id_str] += change
+                self._save()
                 return True
             else:
                 return False
@@ -630,11 +638,9 @@ class CDInfoBot:
 # Command Handler: /save
     def save(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
-            balances_str = ''.join([f'\n{user} : {balance}' for user,balance in self.user_balance.items()])
+            balances_str = self._save()
             if balances_str:
                 self._reply_owner(update, balances_str)
-            with open(self.balance_file, 'w', encoding='utf8') as outfile:
-                json.dump(self.user_balance, outfile, indent=4, ensure_ascii=False)
 
 # Command Handler: /reward
     def reward(self, update: Update, context: CallbackContext) -> None:
