@@ -241,7 +241,7 @@ class CDInfoBot:
         print(self.name, ':', text)
 
     def _save(self):
-        balances_str = '\n{'+''.join([f'\n    "{user}": {balance}' for user,balance in self.user_balance.items()])+'\n}'
+        balances_str = '\n{'+','.join([f'\n    "{user}": {balance}' for user,balance in self.user_balance.items()])+'\n}'
         with open(self.balance_file, 'w', encoding='utf8') as outfile:
             json.dump(self.user_balance, outfile, indent=4, ensure_ascii=False)
         return balances_str
