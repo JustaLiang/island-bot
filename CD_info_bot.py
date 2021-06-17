@@ -60,6 +60,9 @@ def split_question(str_list):
 
     return qsn_opt[0], qsn_opt[1]
 
+def wolfram_replace(string):
+    return string.replace('+', '%2B').replace(',', '%2C').replace('=', '%3D').replace('/', '%2F')
+
 # Sub class
 class BetGame:
     def __init__(self, host, description, options):
@@ -190,6 +193,7 @@ class CDInfoBot:
         dpr.add_handler(tx.CommandHandler('tells',  self.tells))
         dpr.add_handler(tx.CommandHandler('shuffle',self.shuffle))
         dpr.add_handler(tx.CommandHandler('pair',   self.pair))
+        dpr.add_handler(tx.CommandHandler('wolfram',self.wolfram))
         #--------------------------------------------------------
         dpr.add_handler(tx.CommandHandler('balance',self.balance))
         dpr.add_handler(tx.CommandHandler('send',   self.send))
@@ -360,6 +364,13 @@ class CDInfoBot:
             target = target * (len(source)//len(target)+1)
             np.random.shuffle(target)
         result = ''.join([ '\n'+src+' - '+tar for src,tar in zip(source, target)])
+        self._reply(update, result)
+
+# Command Handler: /wolfram
+    def wolfram(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        result = "https://www.wolframalpha.com/input/?i="+'+'.join([wolfram_replace(s) for s in context.args])
         self._reply(update, result)
 
 # finance
@@ -582,7 +593,7 @@ class CDInfoBot:
     def show(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
-        if update.message.chat.type == 'supergroup' and np.random.randint(0,self.p_possi) == 0:
+        if update.message.chat.type != 'private' and np.random.randint(0,self.p_possi) == 0:
             money_str = str(round(np.random.normal(self.p_mean,self.p_std)))
             keyboard = [[tg.InlineKeyboardButton(callback_data=f'envelope:{money_str}', text='領取🧧')]]
             reply_markup = tg.InlineKeyboardMarkup(keyboard)
