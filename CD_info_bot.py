@@ -6,7 +6,6 @@ from telegram import Update
 import telegram.ext as tx
 from telegram.ext import CallbackContext
 
-from parse import parse_token, parse_id
 import numpy as np
 import json, os, signal, time
 # import logging
@@ -62,6 +61,15 @@ def split_question(str_list):
 
 def wolfram_replace(string):
     return string.replace('+', '%2B').replace(',', '%2C').replace('=', '%3D').replace('/', '%2F')
+
+def cloth_check(cloth):
+    fruit_type = []
+    for f in cloth:
+        if f not in fruit_type:
+            fruit_type.append(f)
+        if len(fruit_type) >= 5:
+            return fruit_type
+    return []
 
 # Sub class
 class BetGame:
@@ -173,14 +181,17 @@ class CDInfoBot:
         self.owner = bot_owner
         self.name = bot_name
         self.balance_file = balance_file
-        self.error_reply = ['🤯','😐','😐']
-        self.sorry_reply = ['🍑','🍓','🍎','🍊','🥭','🍍','🍅','🍈','🍋','🍐']
+        self.error_reply = ["🤯","😐","😐"]
+        self.sorry_reply = ["🍑","🍓","🍎","🍊","🥭","🍍","🍅","🍈","🍋","🍐"]
         self.envelopes = []
+        self.user_info = {}
         self.user_balance = {}
+        self.user_fruit = {}
+        self.user_cloth = {}
         self.bet_games = {}
         self.donate_list = {}
-        self.p_possi = 25
-        self.p_mean = 4
+        self.p_possi = 1
+        self.p_mean = -10
         self.p_std = 2
 
         self.updater = tx.Updater(self.token, use_context=True)
@@ -201,13 +212,16 @@ class CDInfoBot:
         dpr.add_handler(tx.CommandHandler('donate', self.donate))
         dpr.add_handler(tx.CommandHandler('dice',   self.dice,  run_async=True))
         dpr.add_handler(tx.CommandHandler('gamble', self.gamble))
+        dpr.add_handler(tx.CommandHandler('fruit',  self.fruit))
+        dpr.add_handler(tx.CommandHandler('cloth',  self.cloth))
+        dpr.add_handler(tx.CommandHandler('throw',  self.throw))
         #--------------------------------------------------------
         dpr.add_handler(tx.CommandHandler('sleep',  self.sleep))
         dpr.add_handler(tx.CommandHandler('status', self.status))
         dpr.add_handler(tx.CommandHandler('clear',  self.clear))
         dpr.add_handler(tx.CommandHandler('param',  self.param))
         dpr.add_handler(tx.CommandHandler('save',   self.save))
-        dpr.add_handler(tx.CommandHandler('reward', self.reward))
+        dpr.add_handler(tx.CommandHandler('mint',   self.mint))
         dpr.add_handler(tx.CommandHandler('reverse',self.reverse))
         #--------------------------------------------------------
         dpr.add_handler(tx.CallbackQueryHandler(self.query_handler))
@@ -215,10 +229,14 @@ class CDInfoBot:
         print(f"[{self.name} handler ready]")
 
         try:
-            self.user_balance = json.load(open(self.balance_file, 'r', encoding='utf8'))
+            self.user_info = json.load(open(self.balance_file, 'r', encoding='utf8'))
+            self.user_balance = self.user_info["balance"]
+            self.user_fruit = self.user_info["fruit"]
+            self.user_cloth = self.user_info["cloth"]
             print(f"[{self.name} load balances]")
         except:
             print(f"[{self.name} no balances]")
+
 
     def run(self):
         self.updater.start_polling(poll_interval=1, clean=True)
@@ -245,10 +263,8 @@ class CDInfoBot:
         print(self.name, ':', text)
 
     def _save(self):
-        balances_str = '\n{'+','.join([f'\n    "{user}": {balance}' for user,balance in self.user_balance.items()])+'\n}'
         with open(self.balance_file, 'w', encoding='utf8') as outfile:
-            json.dump(self.user_balance, outfile, indent=4, ensure_ascii=False)
-        return balances_str
+            json.dump(self.user_info, outfile, indent=4, ensure_ascii=False)
 
     def _balance_change(self, user_id, change):
         id_str = str(user_id)
@@ -419,6 +435,8 @@ class CDInfoBot:
             sender = update.message.from_user
             receiver = update.message.reply_to_message.from_user
             amount = self.user_balance[str(sender.id)]
+            if amount <= 0:
+                update.message.reply_text(f"{sender.full_name} 錢不夠喔😶")
             self._balance_change(sender.id, -amount)
             self._balance_change(receiver.id, amount)
             update.message.bot.send_message(chat_id=update.message.chat.id,
@@ -494,6 +512,67 @@ class CDInfoBot:
                                         text=bet_game.get_text(),
                                         reply_markup=bet_game.get_button())
 
+# Command Handler: /fruit
+    def fruit(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        id_str = str(update.message.from_user.id)
+        if id_str in self.user_fruit:
+            fruit_str = " ".join(self.user_fruit[id_str])
+            if fruit_str:
+                self._reply(update, f"{update.message.from_user.full_name} 的水果:\n{fruit_str}")
+                return
+        self._reply(update, f"{update.message.from_user.full_name} 想要水果🤤")      
+
+# Command Handler: /cloth
+    def cloth(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        if update.message.reply_to_message is None:
+            target = update.message.from_user
+        else:
+            target = update.message.reply_to_message.from_user
+
+        id_str = str(target.id)
+        if id_str in self.user_cloth:
+            fruit_str = " ".join(self.user_cloth[id_str])
+            if fruit_str:
+                self._reply(update, f"{target.full_name} 衣服上的水果:\n{fruit_str}")
+                return
+        self._reply(update, f"{target.full_name} 品行優良😌") 
+
+
+# Command Handler: /throw
+    def throw(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        elif update.message.reply_to_message is None or not context.args:
+            self._reply(update, self.error_reply[0])
+        else:
+            throwing = context.args[0]
+            sender = update.message.from_user
+            receiver = update.message.reply_to_message.from_user
+            sender_id = str(sender.id)
+            receiver_id = str(receiver.id)
+            if sender_id not in self.user_fruit or throwing not in self.user_fruit[sender_id]:
+                update.message.reply_text(f"{sender.full_name} 沒有那個水果😶")
+                return
+            self.user_fruit[sender_id].remove(throwing)
+            if receiver_id not in self.user_cloth:
+                self.user_cloth[receiver_id] = []
+            self.user_cloth[receiver_id].append(throwing)
+            accu = cloth_check(self.user_cloth[receiver_id])
+            update.message.reply_text(f"{sender.full_name} 向 {receiver.full_name} 砸了一顆 {throwing}")
+            if accu:
+                [ self.user_cloth[receiver_id].remove(a) for a in accu]
+                self._force_change(receiver_id, -30)
+                update.message.bot.send_message(chat_id=update.message.chat.id,
+                                                text=f"{receiver.full_name} 多次令人不適，扣除30顆 島幣")
+            self._save()
+
+## query_handler
+####################################################################################
+
 # Callback Query Handler: query_handler
     def query_handler(self, update: Update, context: CallbackContext) -> None:
         data = update.callback_query.data
@@ -511,11 +590,18 @@ class CDInfoBot:
             query.answer(text="搶到啦😁")
             money = int(query.data.split(':')[1])
             if money <= 0:
-                query.edit_message_text(f"{query.from_user.full_name} 收到一顆 {np.random.choice(self.sorry_reply)}")
+                fruit = np.random.choice(self.sorry_reply)
+                id_str = str(query.from_user.id)
+                if id_str not in self.user_fruit:
+                    self.user_fruit[id_str] = [fruit]
+                else:
+                    self.user_fruit[id_str].append(fruit)
+                self._save()
+                query.edit_message_text(f"{query.from_user.full_name} 收到一顆 {fruit}")
             else:
                 money_str = "{:,}".format(money)
-                query.edit_message_text(f"{query.from_user.full_name} 收到{money_str}顆 島幣")
                 self._balance_change(query.from_user.id, money)
+                query.edit_message_text(f"{query.from_user.full_name} 收到{money_str}顆 島幣")
             self.envelopes.append(query.message.message_id)
         else:
             query.answer(text="沒搶到🙁")
@@ -593,7 +679,8 @@ class CDInfoBot:
     def show(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
-        if update.message.chat.type != 'private' and np.random.randint(0,self.p_possi) == 0:
+        if np.random.randint(0,self.p_possi) == 0:
+        # if update.message.chat.type != 'private' and np.random.randint(0,self.p_possi) == 0:
             money_str = str(round(np.random.normal(self.p_mean,self.p_std)))
             keyboard = [[tg.InlineKeyboardButton(callback_data=f'envelope:{money_str}', text='領取🧧')]]
             reply_markup = tg.InlineKeyboardMarkup(keyboard)
@@ -649,12 +736,10 @@ class CDInfoBot:
 # Command Handler: /save
     def save(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
-            balances_str = self._save()
-            if balances_str:
-                self._reply_owner(update, balances_str)
+            self._save()
 
-# Command Handler: /reward
-    def reward(self, update: Update, context: CallbackContext) -> None:
+# Command Handler: /mint
+    def mint(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
             if len(context.args) == 2 and context.args[0] in self.user_balance:
                 try:
@@ -680,6 +765,7 @@ class CDInfoBot:
                 self._force_changes(re_changes)
                 update.message.reply_text(f"{game.id}\n時光倒流"+''.join([f"\n***{gamer_id[-4:]} {'收回' if amount > 0 else '繳回'}{abs(amount)}顆 島幣" for gamer_id,amount in re_changes.items()]))
                 del self.bet_games[context.args[0]]
+                self._save()
             else:
                 self._reply_owner(update, 'state error')
 
@@ -687,27 +773,15 @@ class CDInfoBot:
 
 def main():
 
-    bot_list = (('token_CD_info_bot', 'Island Bot', 'balance_island.json'),
-                ('token_CD_shad_bot', 'Shadow Bot', 'balance_shadow.json'))
+    bot_file = "bot_island.json"
+    # bot_file = "bot_shadow.json"
 
-    which = 0
+    bot_info = json.load(open(bot_file, 'r', encoding='utf8'))
 
-    bot_token = parse_token(bot_list[which][0])
-    if not bot_token:
-        print("[bot token file not found]")
-        return
-
-    bot_owner = parse_id('id_justa')
-    if not bot_owner:
-        print("[owner id file not found]")
-        return
-    
-    bot_name = bot_list[which][1]
-
-    bot = CDInfoBot(bot_token=bot_token,
-                    bot_owner=bot_owner,
-                    bot_name=bot_name,
-                    balance_file=bot_list[which][2])
+    bot = CDInfoBot(bot_token=bot_info['token'],
+                    bot_owner=bot_info['owner'],
+                    bot_name=bot_info['name'],
+                    balance_file=bot_info['balance file'])
     bot.run()
 
 if __name__ == '__main__':
