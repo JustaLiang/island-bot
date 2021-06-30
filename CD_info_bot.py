@@ -8,6 +8,10 @@ from telegram.ext import CallbackContext
 
 import numpy as np
 import json, os, signal, time, sys
+
+from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
+from datetime import datetime
 # import logging
 # logging.basicConfig(
 #     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.DEBUG
@@ -228,7 +232,8 @@ class CDInfoBot:
         #--------------------------------------------------------
         dpr.add_handler(tx.CallbackQueryHandler(self.query_handler))
         dpr.add_handler(tx.MessageHandler(tx.Filters.all, self.show))
-        self.bot = dpr.bot.getMe()
+        self.bot = dpr.bot
+        self.me = self.bot.getMe()
         print(f"[{self.name} handler ready]")
 
         try:
@@ -266,7 +271,7 @@ class CDInfoBot:
         print(self.name, ':', text)
 
     def _reply_owner(self, update, text, **kwargs):
-        update.message.bot.send_message(chat_id=self.owner, text=text)
+        self.bot.send_message(chat_id=self.owner, text=text)
         print(self.name, ':', text)
 
     def _save(self):
@@ -302,6 +307,37 @@ class CDInfoBot:
 
     def _force_changes(self, change_sheet):
         [self._force_change(user_id, change) for user_id,change in change_sheet.items()]
+
+    def _sentence_announce(self, user):
+        profile = user.get_profile_photos()
+        file = None
+        for p in profile.photos:
+            try:
+                file = self.bot.get_file(p[0])
+                psize = (p[0]["width"], p[0]["height"])
+                break
+            except tg.error.TelegramError:
+                pass
+        if file is not None:
+            bio = BytesIO(file.download_as_bytearray())
+            img = Image.open(bio)
+            img = img.convert("L").convert("RGB")
+        else:
+            bio = BytesIO()
+            psize = (160,160)
+            img = Image.new("RGB", psize)
+
+        draw = ImageDraw.Draw(img)
+        font = ImageFont.truetype("Oswald-Bold.ttf", psize[0]//8)
+        timestamp = datetime.now().strftime("%Y/%m/%d\n%H:%M:%S")
+        draw.multiline_text(xy=(psize[0]//2,psize[1]//2),
+                            text=f"{timestamp}\n{user.full_name}\nFINED 25 ISD",
+                            fill=(255,0,0), font=font, anchor="mm",
+                            spacing=psize[0]//16, align="center")
+        bio.seek(0)
+        img.save(bio, "JPEG")
+        bio.seek(0)
+        return bio
 
 # question
 ####################################################################################
@@ -434,8 +470,8 @@ class CDInfoBot:
                 update.message.reply_text(f"{sender.full_name} 錢不夠喔😶")
                 return
             self._balance_change(receiver.id, amount)
-            update.message.bot.send_message(chat_id=update.message.chat.id,
-                                            text=f"{sender.full_name} 送給 {receiver.full_name} {amount}顆 島幣")
+            self.bot.send_message(  chat_id=update.message.chat.id,
+                                    text=f"{sender.full_name} 送給 {receiver.full_name} {amount}顆 島幣")
 
 # Command Handler: /allin
     def allin(self, update: Update, context: CallbackContext) -> None:
@@ -452,8 +488,8 @@ class CDInfoBot:
                 return
             self._balance_change(sender.id, -amount)
             self._balance_change(receiver.id, amount)
-            update.message.bot.send_message(chat_id=update.message.chat.id,
-                                            text=f"{sender.full_name} 歐印 {receiver.full_name} {amount}顆 島幣")
+            self.bot.send_message(  chat_id=update.message.chat.id,
+                                    text=f"{sender.full_name} 歐印 {receiver.full_name} {amount}顆 島幣")
 
 # Command Handler: /donate
     def donate(self, update: Update, context: CallbackContext) -> None:
@@ -536,7 +572,7 @@ class CDInfoBot:
         if id_str in self.user_fruit:
             fruit_str = " ".join(self.user_fruit[id_str])
             if fruit_str:
-                self._reply(update, f"{update.message.from_user.full_name} 的水果:\n{fruit_str}")
+                self._reply(update, f"{update.message.from_user.full_name} 的水果庫:\n{fruit_str}")
                 return
         self._reply(update, f"{update.message.from_user.full_name} 想要水果🤤")      
 
@@ -577,16 +613,23 @@ class CDInfoBot:
                 self.user_cloth[receiver_id] = []
             self.user_cloth[receiver_id].append(throwing)
             accu = cloth_check(self.user_cloth[receiver_id])
-            update.message.reply_text(f"{sender.full_name} 向 {receiver.full_name} 砸了一顆 {throwing}")
+            if sender.id == receiver.id:
+                update.message.reply_text(f"{sender.full_name} 自砸了一顆 {throwing} 哇嗚😯")
+            else:  
+                update.message.reply_text(f"{sender.full_name} 向 {receiver.full_name} 砸了一顆 {throwing}")
             if accu:
                 [self.user_cloth[receiver_id].remove(a) for a in accu]
                 self._force_change(receiver_id, -25)
-                update.message.bot.send_message(chat_id=update.message.chat.id,
-                                                text=f"{receiver.full_name} 多次令人不適 扣除25顆 島幣")
+                msg = self.bot.send_photo(chat_id=update.message.chat.id,
+                                          photo=self._sentence_announce(receiver),
+                                          caption=f"{receiver.full_name} 多次令人不適\n罰款 25 顆 島幣")
+                self.bot.pin_chat_message(chat_id=update.message.chat.id,
+                                          message_id=msg.message_id)
+
             self._save()
 
 # Command Handler: /wash
-    def wash(self, update: Update, context: CallbackContext) -> None:            
+    def wash(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
         elif update.message.reply_to_message is None:
@@ -602,12 +645,12 @@ class CDInfoBot:
             sender = update.message.from_user
             receiver = update.message.reply_to_message.from_user
             if str(receiver.id) not in self.user_cloth:
-                update.message.bot.send_message(chat_id=update.message.chat.id,
-                                                text=f"{receiver.full_name} 的衣服很乾淨欸😤")
+                self.bot.send_message(  chat_id=update.message.chat.id,
+                                        text=f"{receiver.full_name} 的衣服很乾淨欸😤")
             target_cloth = self.user_cloth[str(receiver.id)]
             if len(target_cloth) == 0:
-                update.message.bot.send_message(chat_id=update.message.chat.id,
-                                                text=f"{receiver.full_name} 的衣服很乾淨欸😤")
+                self.bot.send_message(  chat_id=update.message.chat.id,
+                                        text=f"{receiver.full_name} 的衣服很乾淨欸😤")
                 return
             if amount > len(target_cloth):
                 amount = len(target_cloth)
@@ -617,11 +660,11 @@ class CDInfoBot:
                 return
             washed_fruit = [target_cloth.pop() for _ in range(amount)]
             if sender.id == receiver.id:
-                update.message.bot.send_message(chat_id=update.message.chat.id,
-                                                text=f"{sender.full_name} 花{cost}顆島幣 自己洗掉 {' '.join(reversed(washed_fruit))}")
+                self.bot.send_message(  chat_id=update.message.chat.id,
+                                        text=f"{sender.full_name} 花{cost}顆島幣 自己洗掉 {' '.join(reversed(washed_fruit))}")
             else:
-                update.message.bot.send_message(chat_id=update.message.chat.id,
-                                                text=f"{sender.full_name} 花{cost}顆島幣 幫 {receiver.full_name} 洗掉 {' '.join(washed_fruit)}")
+                self.bot.send_message(  chat_id=update.message.chat.id,
+                                        text=f"{sender.full_name} 花{cost}顆島幣 幫 {receiver.full_name} 洗掉 {' '.join(washed_fruit)}")
 
 ## query_handler
 ####################################################################################
@@ -736,7 +779,7 @@ class CDInfoBot:
             money_str = str(round(np.random.normal(self.p_mean,self.p_std)))
             keyboard = [[tg.InlineKeyboardButton(callback_data=f'envelope:{money_str}', text='領取🧧')]]
             reply_markup = tg.InlineKeyboardMarkup(keyboard)
-            update.message.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")
+            self.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")
 
 # control (owner only)
 ####################################################################################
@@ -766,9 +809,9 @@ class CDInfoBot:
                     del self.bet_games[gid]
 
             for donate in self.donate_list.values():
-                update.message.bot.edit_message_reply_markup(chat_id=donate['chat_id'],
-                                                             message_id=donate['msg_id'],
-                                                             reply_markup=None)
+                self.bot.edit_message_reply_markup( chat_id=donate['chat_id'],
+                                                    message_id=donate['msg_id'],
+                                                    reply_markup=None)
             self.donate_list = {}
             self.status(update, context)
 

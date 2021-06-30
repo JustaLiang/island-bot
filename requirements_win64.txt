@@ -20,7 +20,7 @@ pip=20.3.3=pyhd8ed1ab_0
 pycparser=2.20=pypi_0
 pytelegrambotapi=3.7.4=pypi_0
 python=3.7.9=h7840368_0_cpython
-python-telegram-bot=13.1=pypi_0
+python-telegram-bot=13.2=pypi_0
 python_abi=3.7=1_cp37m
 pytz=2020.5=pypi_0
 requests=2.25.1=pypi_0
@@ -34,3 +34,4 @@ vc=14.2=hb210afc_2
 vs2015_runtime=14.28.29325=h5e1d092_0
 wheel=0.36.2=pyhd3deb0d_0
 wincertstore=0.2=py37hc8dfbb8_1005
+pillow=8.2.0
