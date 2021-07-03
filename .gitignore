@@ -134,3 +134,4 @@ token**
 *.csv
 ID**
 *.json
+**.DS_Store
