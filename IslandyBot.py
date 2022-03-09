@@ -100,7 +100,7 @@ class BetGame:
 
     def set_id(self, game_id):
         self.id = game_id
-        self.description = f"{self.id}\n{self.description}"
+        self.description = f"{self.id[-7:]}\n{self.description}"
 
     def get_header(self):
         return f"{self.description}\n---{self.state}---"
@@ -184,24 +184,36 @@ class BetGame:
 
 # Bot class
 class CDInfoBot:
-    def __init__(self, bot_token, bot_owner, bot_name):
-        self.token = bot_token
-        self.owner = bot_owner
-        self.name = bot_name
+    def __init__(self, bot_profile):
+        self.setup = False
+
+        bot_info = json.load(open(bot_profile, 'r', encoding='utf8'))
+        self.token = bot_info['token']
+        self.owner = bot_info['owner']
+        self.name = bot_info['name']
         self.error_reply = ["🤯","😐","😐"]
         self.sorry_reply = ["🍑","🍓","🍎","🍊","🥭","🍍","🍅","🍈","🍋","🍐"]
-        self.envelopes = []
         self.bet_games = {}
-        self.p_possi = 1
-        self.p_mean = 0
-        self.p_std = 2
-        self.setup = False
+        self.dev = bot_info['dev']
+        if self.dev:
+            self._valid_type = self._dev_valid_type
+            self.p_possi = 1
+            self.p_mean = 0
+            self.p_std = 4
+        else:
+            self._valid_type = self._norm_valid_type            
+            self.p_possi = 50
+            self.p_mean = 4
+            self.p_std = 2
 
         # database
         self.client = pymongo.MongoClient("mongodb://localhost:27017")
         self.db = self.client.get_database(self.name)
-        # self.db.drop_collection('balance')
+        # if self.dev:
+        #     self.db.drop_collection('balance')
+        #     self.db.drop_collection('buffer')
         self.db_balance = self.db.get_collection('balance')
+        self.db_buffer = self.db.get_collection('buffer')
         print(f"[{self.name} setup database]")
 
         self.updater = tx.Updater(self.token, use_context=True)
@@ -224,17 +236,22 @@ class CDInfoBot:
         dpr.add_handler(tx.CommandHandler('fruit',  self.fruit))
         dpr.add_handler(tx.CommandHandler('cloth',  self.cloth))
         dpr.add_handler(tx.CommandHandler('throw',  self.throw))
+        dpr.add_handler(tx.CommandHandler('sell',   self.sell))
+        dpr.add_handler(tx.CommandHandler('buy',    self.buy))
         #--------------------------------------------------------
         dpr.add_handler(tx.CommandHandler('sleep',  self.sleep))
         dpr.add_handler(tx.CommandHandler('status', self.status))
         dpr.add_handler(tx.CommandHandler('clear',  self.clear))
         dpr.add_handler(tx.CommandHandler('param',  self.param))
         dpr.add_handler(tx.CommandHandler('reverse',self.reverse))
+        dpr.add_handler(tx.CommandHandler('mint',   self.mint))
+        # dpr.add_handler(tx.CommandHandler('load',   self.load))
         #--------------------------------------------------------
         dpr.add_handler(tx.CallbackQueryHandler(self.query_handler))
         dpr.add_handler(tx.MessageHandler(tx.Filters.all, self.show))
         self.bot = dpr.bot
         self.me = self.bot.getMe()
+        self.db_balance.delete_one({'user': self.me.id})
         print(f"[{self.name} handler ready]")
 
         self.setup = True
@@ -257,6 +274,12 @@ class CDInfoBot:
         else:
             print(update.message.from_user.full_name, ':', update.message.text)
             return True
+
+    def _dev_valid_type(self, msg_type):
+        return msg_type == 'private'
+
+    def _norm_valid_type(seld, msg_type):
+        return msg_type != 'private'
 
     def _reply(self, update, text, **kwargs):
         update.message.reply_text(text)
@@ -286,6 +309,19 @@ class CDInfoBot:
         if None is self.db_balance.find_one_and_update({'user': user_id}, {'$inc': {'balance': change}}):
             self.db_balance.insert_one({'user': user_id, 'balance': change, 'fruit': "", 'cloth': ""})
 
+    def _fruit_transfer(self, sender_id: int, receiver_id: int, fruit: str):
+        sender_info = self._get_user_info(sender_id)
+        receiver_info = self._get_user_info(receiver_id)
+        if fruit in sender_info['fruit'] and len(receiver_info['fruit']) < 5:
+            fruit_after = sender_info['fruit'].replace(fruit, '', 1)
+            self.db_balance.update_one({'user': sender_id}, {'$set': {'fruit': fruit_after}})
+            if receiver_id != self.me.id:
+                fruit_after = receiver_info['fruit'] + fruit
+                self.db_balance.update_one({'user': receiver_id}, {'$set': {'fruit': fruit_after}})
+            return True
+        else:
+            return False
+
     def _fruit_change(self, user_id: int, fruit: str, inc: bool):
         user_info = self._get_user_info(user_id)
         if inc:
@@ -305,9 +341,11 @@ class CDInfoBot:
 
     def _fruit_pop(self, user_id: int):
         user_info = self._get_user_info(user_id)
-        if user_info['fruit']:
-            fruit = user_info['fruit'][0]
-            self.db_balance.update_one({'user': user_id}, {'$set': {'fruit': user_info['fruit'][1:]}})
+        fruits_after = user_info['fruit']
+        if fruits_after:
+            fruit = np.random.choice(list(fruits_after))
+            fruit_after = fruits_after.replace(fruit, '', 1)
+            self.db_balance.update_one({'user': user_id}, {'$set': {'fruit': fruit_after}})
             return fruit
         else:
             return ""
@@ -341,7 +379,7 @@ class CDInfoBot:
         font = ImageFont.truetype("Oswald-Bold.ttf", psize[0]//8)
         timestamp = datetime.now().strftime("%Y/%m/%d\n%H:%M:%S")
         draw.multiline_text(xy=(psize[0]//2,psize[1]//2),
-                            text=f"{timestamp}\n{user.full_name}\nFINED 25 ISD",
+                            text=f"{timestamp}\n{user.full_name}\nFINED 50 ISD",
                             fill=(255,0,0), font=font, anchor="mm",
                             spacing=psize[0]//16, align="center")
         bio.seek(0)
@@ -461,29 +499,62 @@ class CDInfoBot:
     def send(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
-        elif update.message.reply_to_message is None:
+        if update.message.reply_to_message is None or not context.args:
             self._reply(update, self.error_reply[0])
-        elif not context.args or not str.isdigit(context.args[0]):
-            self._reply(update, self.error_reply[0])
-        else:
+            return
+        sender = update.message.from_user
+        receiver = update.message.reply_to_message.from_user
+        # send ISD coin
+        if str.isdigit(context.args[0]):
             amount = int(context.args[0])
             if amount <= 0:
                 self._reply(update, self.error_reply[1])
                 return
 
-            sender = update.message.from_user
-            receiver = update.message.reply_to_message.from_user
             if not self._balance_change(sender.id, -amount):
                 update.message.reply_text(f"{sender.full_name} 錢不夠喔😶")
                 return
-            self._balance_change(receiver.id, amount)
-            self.bot.send_message(  chat_id=update.message.chat.id,
-                                    text=f"{sender.full_name} 送給 {receiver.full_name} {amount}顆 島幣")
-            
-            if receiver.id == self.me.id:
+            if receiver.id != self.me.id:
+                self._balance_change(receiver.id, amount)
+                self.bot.send_message(chat_id=update.message.chat.id,
+                    text=f"{sender.full_name} 送給 {receiver.full_name} {amount}顆 島幣")
+            else:
+                self.bot.send_message(chat_id=update.message.chat.id,
+                    text=f"小島不需要錢喔 😎")
                 keyboard = [[tg.InlineKeyboardButton(callback_data=f'envelope:{amount}', text='領取🧧')]]
                 reply_markup = tg.InlineKeyboardMarkup(keyboard)
                 self.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")        
+        # send fruit
+        else:
+            valid_fruits = ""
+            for fruit in context.args[0]:
+                if self._fruit_transfer(sender.id, receiver.id, fruit):
+                    valid_fruits += fruit
+            if valid_fruits:
+                self.bot.send_message(chat_id=update.message.chat.id,
+                    text=f"{sender.full_name} 送給 {receiver.full_name} {valid_fruits}")    
+            else:
+                self._reply(update, "來亂的嗎🤨")
+                return
+            if receiver.id == self.me.id:
+                if len(valid_fruits) == 1:
+                    update.message.reply_text(f"謝謝 {sender.full_name}！\n好吃")
+                    self.bot.send_message(chat_id=update.message.chat.id, text="😋")
+                elif len(valid_fruits) == 2:
+                    update.message.reply_text(f'謝謝 {sender.full_name}！\n好好吃')
+                    self.bot.send_message(chat_id=update.message.chat.id, text="😋")
+                elif len(valid_fruits) == 3:
+                    update.message.reply_text(f'謝謝 {sender.full_name}！\n好多好多')
+                    self.bot.send_message(chat_id=update.message.chat.id, text="🤩")
+                elif len(valid_fruits) == 4:
+                    update.message.reply_text(f'謝謝 {sender.full_name}！\n好幸福')
+                    self.bot.send_message(chat_id=update.message.chat.id, text="🥰")
+                elif len(valid_fruits) == 5:
+                    update.message.reply_text(f'謝謝 {sender.full_name}！\n幸福到升天')
+                    self.bot.send_message(chat_id=update.message.chat.id, text="😇")
+                    self.bot.send_message(chat_id=update.message.chat.id, text="(暫停服務)")
+                    time.sleep(60)
+                    self.bot.send_message(chat_id=update.message.chat.id, text="我回來了🙂")
 
 # Command Handler: /allin
     def allin(self, update: Update, context: CallbackContext) -> None:
@@ -552,7 +623,7 @@ class CDInfoBot:
             return
         bet_game = BetGame(update.message.from_user, context.args[0], context.args[1:])
         game_msg = update.message.reply_text(text=bet_game.get_text(), reply_markup=bet_game.get_button())
-        game_id = f'{game_msg.chat.id%10000}#{game_msg.message_id}'
+        game_id = f'{game_msg.chat.id}#{game_msg.message_id}'
         bet_game.set_id(game_id)
         self.bet_games[game_id] = bet_game
         game_msg.bot.edit_message_text( chat_id=game_msg.chat.id,
@@ -599,6 +670,9 @@ class CDInfoBot:
             if not throwing:
                 update.message.reply_text(f"{sender.full_name} 沒有水果😶")
                 return
+            if receiver.id == self.me.id:
+                self._reply(update, "小島怎麼了🥺")
+                return
             receiver_info = self._get_user_info(receiver.id)
             receiver_cloth = receiver_info['cloth'] + throwing
             if sender.id == receiver.id:
@@ -608,12 +682,63 @@ class CDInfoBot:
             penalty, remain = cloth_check(receiver_cloth)
             self.db_balance.update_one({'user': receiver.id}, {'$set': {'cloth': remain}})
             if penalty:
-                self._force_change(receiver.id, -100)
+                self._force_change(receiver.id, -50)
                 msg = self.bot.send_photo(chat_id=update.message.chat.id,
                                         photo=self._sentence_announce(receiver),
-                                        caption=f"{receiver.full_name} 言行多次令人不適\n罰款 100 顆 島幣")
+                                        caption=f"{receiver.full_name} 言行多次令人不適\n罰款 50 顆 島幣")
                 self.bot.pin_chat_message(chat_id=update.message.chat.id,
                                         message_id=msg.message_id)
+
+# Command Handler: /sell
+    def sell(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        if len(context.args) != 2 or not str.isdigit(context.args[1]):
+            self._reply(update, self.error_reply[0])
+            return
+        seller = update.message.from_user
+        valid_fruits = ""
+        for fruit in context.args[0]:
+            if self._fruit_change(seller.id, fruit, False):
+                valid_fruits += fruit
+        if not valid_fruits:
+            self._reply(update, "來亂的嗎🤨")
+            return
+        price = context.args[1]
+        keyboard = [[tg.InlineKeyboardButton(callback_data=f'sell:{seller.id}:{valid_fruits}:{price}', text=f'${price} 買入')]]
+        reply_markup = tg.InlineKeyboardMarkup(keyboard)
+        msg = self.bot.send_message(
+            chat_id=update.message.chat_id,
+            reply_markup=reply_markup,
+            text=f"{seller.full_name}出售水果！\n{valid_fruits}")
+        self.db_buffer.insert_one({'chat':msg.chat_id, 'msg': msg.message_id})
+
+# Command Handler: /buy
+    def buy(self, update: Update, context: CallbackContext) -> None:
+        if not self._valid_update(update):
+            return
+        if len(context.args) != 2 or not str.isdigit(context.args[1]):
+            self._reply(update, self.error_reply[0])
+            return
+        buyer = update.message.from_user
+        valid_fruits = ""
+        for fruit in context.args[0]:
+            if fruit in self.sorry_reply:
+                valid_fruits += fruit
+        if not valid_fruits:
+            self._reply(update, "來亂的嗎🤨")
+            return
+        price = context.args[1]
+        if not self._balance_change(buyer.id, -int(price)):
+            self._reply(update, "錢不夠耶😶")
+            return
+        keyboard = [[tg.InlineKeyboardButton(callback_data=f'buy:{buyer.id}:{valid_fruits}:{price}', text=f'${price} 賣出')]]
+        reply_markup = tg.InlineKeyboardMarkup(keyboard)
+        msg = self.bot.send_message(
+            chat_id=update.message.chat_id,
+            reply_markup=reply_markup,
+            text=f"{buyer.full_name}想買水果！\n{valid_fruits}")
+        self.db_buffer.insert_one({'chat':msg.chat_id, 'msg': msg.message_id})
 
 ## query_handler
 ####################################################################################
@@ -625,28 +750,34 @@ class CDInfoBot:
             self.open_envelope(update, context)
         elif data[:6] == 'gamble':
             self.gamble_action(update, context)
+        elif data[:4] == 'sell':
+            self.process_sell(update, context)
+        elif data[:3] == 'buy':
+            self.process_buy(update, context)
 
 # Callback Query Handler: open_envelope
     def open_envelope(self, update: Update, context: CallbackContext) -> None:
         query = update.callback_query
-        if query.message.message_id not in self.envelopes:
-            money = int(query.data.split(':')[1])
-            user_id = query.from_user.id
-            if money <= 0:
-                fruit = np.random.choice(self.sorry_reply)
-                if self._fruit_change(user_id, fruit, True):
-                    query.answer(text="搶到啦😁")
-                else:
-                    query.answer(text="水果太多囉🤨")
-                    return
-                query.edit_message_text(f"{query.from_user.full_name} 收到一顆 {fruit}")
-            else:
-                money_str = "{:,}".format(money)
-                self._balance_change(query.from_user.id, money)
-                query.edit_message_text(f"{query.from_user.full_name} 收到{money_str}顆 島幣")
-            self.envelopes.append(query.message.message_id)
-        else:
+        envelope = {'chat': query.message.chat_id, 'msg': query.message.message_id}
+        if self.db_buffer.find_one(envelope) is None:
             query.answer(text="沒搶到🙁")
+            return
+        money = int(query.data.split(':')[1])
+        user_id = query.from_user.id
+        if money <= 0:
+            fruit = np.random.choice(self.sorry_reply)
+            if self._fruit_change(user_id, fruit, True):
+                query.answer(text="搶到啦😁")
+            else:
+                query.answer(text="水果太多囉😶")
+                return
+            query.edit_message_text(f"{query.from_user.full_name} 收到一顆 {fruit}")
+        else:
+            money_str = "{:,}".format(money)
+            self._balance_change(query.from_user.id, money)
+            query.edit_message_text(f"{query.from_user.full_name} 收到{money_str}顆 島幣")
+        self.db_buffer.delete_one(envelope)
+        
 
 # Callback Query Handler: gamble_action
     def gamble_action(self, update: Update, context: CallbackContext) -> None:
@@ -656,17 +787,17 @@ class CDInfoBot:
             query.answer(text="無效賭局", show_alert=True)
             return
         game = self.bet_games[game_id]
-        struct = query.data.split(':')
+        gamble_struct = query.data.split(':')
         gamer = query.from_user
         host = game.host
-        act = len(struct)
+        act = len(gamble_struct)
         # betting
         if act == 3:
-            stk = int(struct[2])
+            stk = int(gamble_struct[2])
             if not self._balance_change(gamer.id, -stk):
                 query.answer(text="錢不夠耶😶", show_alert=True)
             else:
-                game.stake(gamer, struct[1], stk)
+                game.stake(gamer, gamble_struct[1], stk)
                 query.answer(text="下注成功", show_alert=True)
                 query.edit_message_text(text=game.get_text(), reply_markup=game.get_button())
         # close
@@ -682,7 +813,7 @@ class CDInfoBot:
             if gamer != host:
                 query.answer(text="你不是莊家😶", show_alert=True)
             else:
-                outputs, changes_display = game.settle(struct[1])
+                outputs, changes_display = game.settle(gamble_struct[1])
                 self._balance_changes(outputs)
                 query.answer(text="結算成功")
                 query.edit_message_text(text=game.get_text(), reply_markup=game.get_button())
@@ -690,15 +821,101 @@ class CDInfoBot:
         else:
             query.answer(text="系統錯誤", show_alert=True)
 
+
+    def process_sell(self, update: Update, context: CallbackContext) -> None:
+        query = update.callback_query
+        envelope = {'chat': query.message.chat_id, 'msg': query.message.message_id}
+        if self.db_buffer.find_one(envelope) is None:
+            query.answer(text="別人成交了🙁")
+            return
+        sell_struct = query.data.split(':')
+        if len(sell_struct) != 4:
+            print("error:", query.data)
+            return
+        seller_id = int(sell_struct[1])
+        fruits = sell_struct[2]
+        price = int(sell_struct[3])
+        buyer = query.from_user
+        buyer_info = self._get_user_info(buyer.id)
+        fruit_after = buyer_info['fruit'] + fruits
+        if len(fruit_after) > 5:
+            query.answer(text="水果太多囉😶")
+            return
+        if seller_id != buyer.id:
+            # buyer get fruit lose coin
+            if not self._balance_change(buyer.id, -price):
+                query.answer(text="錢不夠耶😶")
+                return
+            for f in fruits:
+                self._fruit_change(buyer.id, f, True)
+            # seller get coin
+            self._balance_change(seller_id, price)
+
+            self.db_buffer.delete_one(envelope)
+            query.edit_message_text(f"{buyer.full_name}\n花 {price} 島幣\n買了 {fruits}")
+            query.answer(text=f"買了{fruits}！ 🥳", show_alert=True)
+        else:
+            # return fruits
+            for f in fruits:
+                self._fruit_change(buyer.id, f, True)
+            self.db_buffer.delete_one(envelope)
+            query.answer(text=f"已撤回賣單")
+            query.delete_message()
+
+# Callback Query Handler: process_buy
+    def process_buy(self, update: Update, context: CallbackContext) -> None:
+        query = update.callback_query
+        envelope = {'chat': query.message.chat_id, 'msg': query.message.message_id}
+        if self.db_buffer.find_one(envelope) is None:
+            query.answer(text="別人成交了🙁")
+            return
+        buy_struct = query.data.split(':')
+        if len(buy_struct) != 4:
+            print("error:", query.data)
+            return
+        buyer_id = int(buy_struct[1])
+        fruits = buy_struct[2]
+        price = int(buy_struct[3])
+        seller = query.from_user
+        buyer_info = self._get_user_info(buyer_id)
+        fruit_after = buyer_info['fruit'] + fruits
+        seller_fruits = self._get_user_info(seller.id)['fruit']
+        if seller.id != buyer_id:
+            if len(fruit_after) > 5:
+                query.answer(text="買家水果太多囉😶")
+                return
+            for f in fruits:
+                if f not in seller_fruits:
+                    query.answer(text=f"你沒有{f}喔😶")
+                    return
+            # buyer get fruit
+            for f in fruits:
+                self._fruit_change(buyer_id, f, True)
+            # seller get coin and lost fruit
+            self._balance_change(seller.id, price)
+            for f in fruits:
+                self._fruit_change(seller.id, f, False)
+
+            self.db_buffer.delete_one(envelope)
+            query.edit_message_text(f"{seller.full_name}\n賣出 {fruits}\n賺了 {price} 島幣")
+            query.answer(text=f"賺取 {price} 島幣！ 🥳", show_alert=True)
+        else:
+            # return coin
+            self._balance_change(seller.id, price)
+            self.db_buffer.delete_one(envelope)
+            query.answer(text=f"已撤回買單")
+            query.delete_message()
+
 # Message Handler: show
     def show(self, update: Update, context: CallbackContext) -> None:
         if not self._valid_update(update):
             return
-        if update.message.chat.type == 'private' and np.random.randint(0,self.p_possi) == 0:
+        if self._valid_type(update.message.chat.type) and np.random.randint(0,self.p_possi) == 0:
             money_str = str(round(np.random.normal(self.p_mean,self.p_std)))
             keyboard = [[tg.InlineKeyboardButton(callback_data=f'envelope:{money_str}', text='領取🧧')]]
             reply_markup = tg.InlineKeyboardMarkup(keyboard)
-            self.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")
+            msg = self.bot.send_message(chat_id=update.message.chat_id, reply_markup=reply_markup, text="搶紅包囉！")
+            self.db_buffer.insert_one({'chat': msg.chat_id, 'msg': msg.message_id})
 
 # control (owner only)
 ####################################################################################
@@ -712,15 +929,13 @@ class CDInfoBot:
 # Command Handler: /status
     def status(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
-            show = f"\nenvelopes: {len(self.envelopes)}"+\
-                   f"\nbet_games: {len(self.bet_games)}\n"+\
+            show = f"\nbet_games: {len(self.bet_games)}\n"+\
                    '\n'.join([f"  {gid} {game.state}" for gid,game in self.bet_games.items()])
             self._reply_owner(update, show)
 
 # Command Handler: /clear
     def clear(self, update: Update, context: CallbackContext) -> None:
         if update.message.from_user.id == self.owner:
-            self.envelopes = []
             for gid in list(self.bet_games):
                 if self.bet_games[gid].state == '流局':
                     del self.bet_games[gid]
@@ -741,29 +956,54 @@ class CDInfoBot:
 
 # Command Handler: /reverse
     def reverse(self, update: Update, context: CallbackContext) -> None:
-        if not context.args:
-            self._reply_owner(update, 'command error')
-        elif context.args[0] not in self.bet_games:
-            self._reply_owner(update, 'no such game')
-        else:
-            game = self.bet_games[context.args[0]]
-            re_changes = game.reverse()
-            if re_changes:
-                self._force_changes(re_changes)
-                update.message.reply_text(f"{game.id}\n時光倒流"+''.join([f"\n***{str(gamer_id)[-4:]} {'收回' if amount > 0 else '繳回'}{abs(amount)}顆 島幣" for gamer_id,amount in re_changes.items()]))
-                del self.bet_games[context.args[0]]
+        if update.message.from_user.id == self.owner:
+            if not context.args:
+                self._reply_owner(update, 'command error')
+            elif context.args[0] not in self.bet_games:
+                self._reply_owner(update, 'no such game')
             else:
-                self._reply_owner(update, 'state error')
+                game = self.bet_games[context.args[0]]
+                re_changes = game.reverse()
+                if re_changes:
+                    self._force_changes(re_changes)
+                    update.message.reply_text(f"{game.id}\n時光倒流"+''.join([f"\n***{str(gamer_id)[-4:]} {'收回' if amount > 0 else '繳回'}{abs(amount)}顆 島幣" for gamer_id,amount in re_changes.items()]))
+                    del self.bet_games[context.args[0]]
+                else:
+                    self._reply_owner(update, 'state error')
+
+# Command Handler: /mint
+    def mint(self, update: Update, context: CallbackContext) -> None:
+        if self.dev and update.message.from_user.id == self.owner:
+            for c in context.args:
+                if str.isdigit(c):
+                    self.db_balance.update_one({'user': self.owner}, {'$set': {'balance': int(c)}})
+                else:
+                    self.db_balance.update_one({'user': self.owner}, {'$set': {'fruit': c}})
+            self.balance(update, context)
+            self.fruit(update, context)
+
+# Command Handler: /load
+    # def load(self, update: Update, context: CallbackContext) -> None:
+    #     if update.message.from_user.id == self.owner:
+    #         balance_json = json.load(open("island_balance.json", 'r', encoding='utf8'))
+    #         for user_id, fruit in balance_json['fruit'].items():
+    #             user_info = self._get_user_info(int(user_id))
+    #             exceed = len(fruit) - len(user_info['fruit'])
+    #             print(exceed)
+    #             return_coin = 0
+    #             if exceed > 0:
+    #                 return_coin = exceed * 5
+    #             self.db_balance.update_one({'user': int(user_id)}, {
+    #                 '$inc': {'balance': -return_coin},
+    #                 '$set': {'fruit': ''.join(fruit)}
+    #             })
+    #         self._reply_owner(update, "load done")
 
 ####################################################################################
 
-def main(bot_file="bot_shadow.json"):
+def main(bot_profile="bot_shadow.json"):
 
-    bot_info = json.load(open(bot_file, 'r', encoding='utf8'))
-
-    bot = CDInfoBot(bot_token=bot_info['token'],
-                    bot_owner=bot_info['owner'],
-                    bot_name=bot_info['name'])
+    bot = CDInfoBot(bot_profile)                
     bot.run()
 
 if __name__ == '__main__':
