@@ -1,5 +1,5 @@
 python-telegram-bot==13.2
 setuptools==51.0.0
-pillow==8.2.0
-numpy==1.21.5
+pillow==9.1.0
+numpy==1.22.3
 pymongo==4.0.1
