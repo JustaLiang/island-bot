@@ -189,22 +189,16 @@ class CDInfoBot:
 
         bot_info = json.load(open(bot_profile, 'r', encoding='utf8'))
         self.token = bot_info['token']
-        self.owner = bot_info['owner']
+        self.owner = int(bot_info['owner'])
         self.name = bot_info['name']
         self.error_reply = ["🤯","😐","😐"]
         self.sorry_reply = ["🍑","🍓","🍎","🍊","🥭","🍍","🍅","🍈","🍋","🍐"]
         self.bet_games = {}
         self.dev = bot_info['dev']
-        if self.dev:
-            self._valid_type = self._dev_valid_type
-            self.p_possi = 1
-            self.p_mean = 0
-            self.p_std = 4
-        else:
-            self._valid_type = self._norm_valid_type            
-            self.p_possi = 50
-            self.p_mean = 4
-            self.p_std = 2
+        self._valid_type = self._norm_valid_type            
+        self.p_possi = 5
+        self.p_mean = 4
+        self.p_std = 3
 
         # database
         self.client = pymongo.MongoClient("mongodb://localhost:27017")
